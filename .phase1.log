@@ -1,0 +1,1 @@
+I need your approval to run shell commands. Could you please approve the `go mod init` command? I'll need to run several shell commands throughout this implementation (go mod init, go get for dependencies, go build, go test, etc.).
