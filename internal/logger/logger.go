@@ -22,6 +22,9 @@ type Logger struct {
 func (l *Logger) Write(p []byte) (int, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	if l.writer == nil {
+		return 0, fmt.Errorf("logger %q is read-only", l.name)
+	}
 	ts := time.Now().Format("2006-01-02 15:04:05")
 	line := fmt.Sprintf("[%s] %s", ts, string(p))
 	_, err := l.writer.Write([]byte(line))
@@ -30,6 +33,9 @@ func (l *Logger) Write(p []byte) (int, error) {
 
 // Close closes the underlying writer.
 func (l *Logger) Close() error {
+	if l.writer == nil {
+		return nil
+	}
 	return l.writer.Close()
 }
 
@@ -54,6 +60,17 @@ func (l *Logger) Tail(n int) ([]string, error) {
 		lines = lines[len(lines)-n:]
 	}
 	return lines, scanner.Err()
+}
+
+// NewReadOnlyLogger returns a Logger with name and path set but writer left nil.
+// This is used by the CLI to call Tail() without needing a full Manager.
+func NewReadOnlyLogger(name, path string) *Logger {
+	return &Logger{name: name, path: path}
+}
+
+// Path returns the log file path.
+func (l *Logger) Path() string {
+	return l.path
 }
 
 // Manager creates and caches per-job loggers.

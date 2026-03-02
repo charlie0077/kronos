@@ -1116,7 +1116,7 @@ git tag v0.1.0 && git push --tags
 
 ---
 
-## Final Verification Checklist
+## Final Verification Checklist (Phases 1–6)
 
 1. `go build ./...` — compiles
 2. `go test ./...` — all tests pass
@@ -1133,3 +1133,283 @@ git tag v0.1.0 && git push --tags
    - Edit YAML while running → hot reload picks up changes
    - Ctrl+C → graceful shutdown within 30s
 5. Cross-compile: `GOOS=windows GOARCH=amd64 go build ./...`
+
+---
+
+## Phase 7: `kronos logs <job>` — Log Viewer
+
+**Goal**: View/tail job logs from CLI without TUI.
+
+### Modify `internal/logger/logger.go`
+
+Add two things after the existing `Logger` struct:
+
+1. **`NewReadOnlyLogger(name, path string) *Logger`** — returns a `Logger` with `name` and `path` set, `writer` left `nil`. This is used by the CLI to call `Tail()` without needing a full `Manager`.
+
+2. **`Path() string`** method on `*Logger` — returns `l.path`.
+
+### Create `cmd/logs.go`
+
+- `logsCmd` with `Use: "logs <job>"`, `Args: cobra.ExactArgs(1)`
+- Flags: `--follow`/`-f` (bool, default false), `--lines`/`-n` (int, default 50)
+- Registered via `rootCmd.AddCommand(logsCmd)` in `init()`
+
+**RunE logic:**
+
+1. `name := args[0]`; find job via `cfg.FindJob(name)` — error if nil
+2. Resolve log path: `filepath.Join(config.LogDir(cfg.Settings), name+".log")`
+3. Create `logger.NewReadOnlyLogger(name, logPath)`
+4. Call `Tail(n)` and print each line to stdout
+5. If `--follow`:
+   - Open file, seek to end (track offset)
+   - Use `fsnotify.NewWatcher()`, add the log file
+   - Loop: on `fsnotify.Write` events, read new bytes from offset, print, update offset
+   - Trap `SIGINT`/`SIGTERM` via `signal.Notify` on a channel, break loop on signal, clean exit
+
+**Note:** `fsnotify` is already in `go.mod`.
+
+### Verify
+
+```
+go build ./... && go test ./...
+kronos logs <job> -n 20
+kronos logs <job> -f
+```
+
+---
+
+## Phase 8: `kronos export` — Export to Native Formats
+
+**Goal**: Export jobs to crontab, launchd plist, or systemd timer formats.
+
+### Create `internal/export/crontab.go`
+
+- `func ToCrontab(jobs []config.Job) (string, error)`
+- Skip disabled jobs (`!j.IsEnabled()`)
+- Map descriptors to 5-field cron: `@daily` → `0 0 * * *`, `@hourly` → `0 * * * *`, `@weekly` → `0 0 * * 0`, `@monthly` → `0 0 1 * *`, `@yearly`/`@annually` → `0 0 1 1 *`
+- `@every` schedules → emit as comment with warning: `# WARNING: @every not supported in cron`
+- Prepend `# kronos: <name>` comment before each entry
+- Build command: if `j.Env` set, prepend `KEY=VAL` pairs; if `j.Dir` set, prepend `cd <dir> &&`
+
+### Create `internal/export/launchd.go`
+
+- `func ToLaunchd(jobs []config.Job) (string, error)`
+- Skip disabled jobs
+- Use `text/template` to generate plist XML per job
+- Map cron schedules to `StartCalendarInterval` dict keys (Hour, Minute, Weekday, Day, Month)
+- `@every` → use `StartInterval` with seconds
+- Separate each plist with `<!-- save as com.kronos.<name>.plist -->`
+- Include `Label`, `ProgramArguments` (split on shell), `WorkingDirectory`, `EnvironmentVariables`
+
+### Create `internal/export/systemd.go`
+
+- `func ToSystemd(jobs []config.Job) (string, error)`
+- Skip disabled jobs
+- Generate `.timer` unit (with `OnCalendar=` for standard schedules, `OnUnitActiveSec=` for `@every`) + `.service` unit per job
+- Separate with `# --- save as kronos-<name>.timer ---` / `# --- save as kronos-<name>.service ---` comments
+- Service includes `ExecStart=`, `WorkingDirectory=`, `Environment=`
+
+### Create `cmd/export.go`
+
+- `exportCmd` with `Use: "export"`, no positional args
+- Flags: `--format` (string, default `"crontab"`, valid: crontab|launchd|systemd), `--output`/`-o` (string, default "")
+- Registered in `init()`
+
+**RunE logic:**
+
+1. Switch on `--format`, call `export.ToCrontab(cfg.Jobs)` / `ToLaunchd` / `ToSystemd`
+2. If `--output` set, write to file; else print to stdout
+
+### Verify
+
+```
+go build ./... && go test ./...
+kronos export --format crontab
+kronos export --format systemd -o /tmp/kronos-units.txt
+```
+
+---
+
+## Phase 9: `kronos import` — Import from Crontab
+
+**Goal**: Parse crontab files into Kronos jobs and merge into config.
+
+### Create `internal/importer/crontab.go`
+
+- `type ParsedJob struct` with `Name, Schedule, Cmd, Dir string; Env map[string]string`
+- `func ParseCrontab(r io.Reader) ([]ParsedJob, []string, error)` — returns jobs + warnings
+- Line-by-line parsing:
+  - Skip blank lines, `#` comment lines
+  - Detect `KEY=VAL` env lines (no spaces in key, `=` present, value before any command chars) → accumulate in env map for subsequent entries
+  - Skip `@reboot` with warning
+  - Handle 5-field (`min hour dom mon dow cmd`) and detect 6-field (user column) — if 6th token looks like a username (no `/`, no `.`), treat as user-field format, skip that column
+  - Extract schedule (first 5 fields or descriptor like `@daily`) + remainder as command
+- Name generation: take basename of first word of command, sanitize (lowercase, alphanumeric + hyphens, max 30 chars), deduplicate with `-2`, `-3` suffixes
+
+### Create `internal/importer/merge.go`
+
+- `type MergeResult struct { Added, Skipped []string }`
+- `func Merge(cfg *config.Config, parsed []ParsedJob) MergeResult`
+- For each parsed job: if `cfg.FindJob(name) != nil`, add to `Skipped`; else build `config.Job`, append to `cfg.Jobs`, add to `Added`
+
+### Create `cmd/importjobs.go`
+
+- `importJobsCmd` with `Use: "import"` (variable named `importJobsCmd` to avoid Go keyword)
+- Flags: `--from` (string, default `"crontab"`), `--file` (string, default `""` meaning stdin)
+- Registered in `init()`
+
+**RunE logic:**
+
+1. Open `--file` or `os.Stdin`
+2. Call `importer.ParseCrontab(reader)`, print any warnings
+3. Call `importer.Merge(cfg, parsed)`
+4. Validate via `config.Validate(cfg)`
+5. Save via `config.Save(resolveConfigPath(), cfg, nil)` (nil node since we're appending, comment preservation not critical)
+6. Print summary: `"Imported X job(s), skipped Y duplicate(s)"`
+
+### Verify
+
+```
+go build ./... && go test ./...
+crontab -l | kronos import --from crontab
+kronos import --from crontab --file /tmp/test-crontab
+```
+
+---
+
+## Phase 10: `kronos prune` — History Cleanup
+
+**Goal**: Delete old run records by age or count.
+
+### Modify `internal/store/history.go`
+
+Add these methods to `*Store`:
+
+1. **`PruneOlderThan(cutoff time.Time, jobName string) (int, error)`** — iterate runs bucket, delete records with `StartTime` before cutoff. If `jobName != ""`, only delete matching prefix. Return count deleted.
+
+2. **`CountOlderThan(cutoff time.Time, jobName string) (int, error)`** — same iteration but count-only (for dry-run). Uses `db.View` instead of `db.Update`.
+
+3. **`PruneKeepN(jobName string, keepN int) (int, error)`** — like existing `PruneHistory` but returns count of deleted records.
+
+4. **`CountPruneKeepN(jobName string, keepN int) (int, error)`** — count excess records without deleting.
+
+5. **`GetAllJobNames() ([]string, error)`** — scan all keys in runs bucket, extract unique job name prefixes (everything before first `/`).
+
+### Create `cmd/prune.go`
+
+- `pruneCmd` with `Use: "prune"`
+- Flags: `--older-than` (string, e.g. `"30d"`), `--keep` (int, default 0), `--job` (string, default ""), `--dry-run` (bool)
+- Registered in `init()`
+
+**RunE logic:**
+
+1. Require at least one of `--older-than` or `--keep` (error otherwise)
+2. Custom duration parser: if string ends with `d`, parse the number and multiply by `24*time.Hour`; else use `time.ParseDuration`
+3. Open store via `store.Open(config.DBPath())`
+4. If `--older-than`:
+   - `cutoff := time.Now().Add(-duration)`
+   - If `--dry-run`: call `CountOlderThan(cutoff, jobName)`, print "Would prune X record(s)"
+   - Else: call `PruneOlderThan(cutoff, jobName)`, print "Pruned X record(s)"
+5. If `--keep`:
+   - If `--job` set: prune/count for that single job
+   - Else: call `GetAllJobNames()`, iterate each, sum up results
+   - Print appropriate message
+
+### Verify
+
+```
+go build ./... && go test ./...
+kronos prune --older-than 30d --dry-run
+kronos prune --keep 50
+kronos prune --job backup-db --older-than 7d
+```
+
+---
+
+## Phase 11: `kronos status --stats` — Job Metrics
+
+**Goal**: Per-job success rate, avg/P95 duration, total runs, last failure.
+
+### Modify `internal/store/history.go`
+
+Change the loop conditions in `GetRuns` and `GetAllRuns`:
+
+- `GetRuns` line 52: `len(records) < limit` → `limit <= 0 || len(records) < limit`
+- `GetAllRuns` line 75: `len(records) < limit` → `limit <= 0 || len(records) < limit`
+
+This makes `limit <= 0` mean "return all records".
+
+### Create `internal/stats/stats.go`
+
+**Types:**
+
+```go
+type JobStats struct {
+    Name         string
+    TotalRuns    int
+    SuccessCount int
+    FailCount    int
+    SuccessRate  float64
+    AvgDuration  time.Duration
+    P95Duration  time.Duration
+    LastFailure  *time.Time
+}
+
+type AggregateStats struct {
+    TotalJobs   int
+    TotalRuns   int
+    SuccessRate float64
+}
+
+type StatsReport struct {
+    Jobs      []JobStats
+    Aggregate AggregateStats
+}
+```
+
+**`func Compute(db *store.Store, jobNames []string) (*StatsReport, error)`:**
+
+- For each job name, call `db.GetRuns(name, 0)` (unlimited)
+- Count success/fail, compute `SuccessRate = float64(success) / float64(total) * 100`
+- Collect durations (`EndTime.Sub(StartTime)`), compute average
+- P95: sort durations ascending, pick index `int(float64(len) * 0.95)` (clamp to last index)
+- Track last failure time (most recent record where `!Success`)
+- Build `AggregateStats` by summing across all jobs
+
+### Modify `cmd/status.go`
+
+1. Add `--stats` flag (bool) bound to a package-level `var showStats bool`
+2. In the `RunE`, after existing logic, add an `if showStats` branch:
+   - Collect job names from `cfg.Jobs`
+   - Call `stats.Compute(db, jobNames)`
+   - If `jsonOut`: JSON-encode the `StatsReport`
+   - Else: render with `tabwriter` — columns: `NAME | RUNS | SUCCESS RATE | AVG DURATION | P95 DURATION | LAST FAILURE`
+   - Print aggregate summary line at the bottom: total jobs, total runs, overall success rate
+
+### Verify
+
+```
+go build ./... && go test ./...
+kronos status --stats
+kronos status --stats --json
+```
+
+---
+
+## File Summary (Phases 7–11)
+
+| Phase | New Files | Modified Files |
+|-------|-----------|----------------|
+| 7 | `cmd/logs.go` | `internal/logger/logger.go` |
+| 8 | `internal/export/crontab.go`, `internal/export/launchd.go`, `internal/export/systemd.go`, `cmd/export.go` | — |
+| 9 | `internal/importer/crontab.go`, `internal/importer/merge.go`, `cmd/importjobs.go` | — |
+| 10 | `cmd/prune.go` | `internal/store/history.go` |
+| 11 | `internal/stats/stats.go` | `internal/store/history.go`, `cmd/status.go` |
+
+## Dependency Order (Phases 7–11)
+
+Phases are independent with one caveat: **Phase 10 and 11 both modify `internal/store/history.go`**. Implement Phase 10's store changes first (adds new methods), then Phase 11's change (modifies existing `GetRuns`/`GetAllRuns` loop conditions). The changes don't conflict — Phase 10 adds new functions, Phase 11 tweaks existing function conditionals.
+
+## Verification per Phase
+
+Each phase: `go build ./...` + `go test ./...` must pass before moving on.
