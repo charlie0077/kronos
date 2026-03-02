@@ -106,7 +106,7 @@ func (s *Scheduler) makeJobFunc(job config.Job) func() {
 			return r.Run(ctx, job)
 		})
 
-		record := newRunRecord(job.Name, result.RunResult, "scheduled")
+		record := newRunRecord(job.Name, result.RunResult, config.TriggerScheduled)
 		_ = s.store.SaveRun(record)
 
 		if result.ShouldPause {
@@ -159,7 +159,7 @@ func (s *Scheduler) RunJob(name string) error {
 	r := &runner.Runner{Logger: jobLog}
 	result := r.Run(context.Background(), job)
 
-	record := newRunRecord(job.Name, result, "manual")
+	record := newRunRecord(job.Name, result, config.TriggerManual)
 	_ = s.store.SaveRun(record)
 
 	if s.onUpdate != nil {

@@ -6,7 +6,7 @@ import "github.com/zhenchaochen/kronos/internal/config"
 func (s *Scheduler) wrapWithOverlapPolicy(job config.Job, fn func()) func() {
 	name := job.Name
 	switch job.Overlap {
-	case "skip":
+	case config.OverlapSkip:
 		return func() {
 			s.mu.Lock()
 			if s.running[name] {
@@ -23,7 +23,7 @@ func (s *Scheduler) wrapWithOverlapPolicy(job config.Job, fn func()) func() {
 			}()
 			fn()
 		}
-	case "queue":
+	case config.OverlapQueue:
 		s.mu.Lock()
 		if _, ok := s.queues[name]; !ok {
 			s.queues[name] = make(chan struct{}, 1)

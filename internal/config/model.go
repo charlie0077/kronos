@@ -33,6 +33,16 @@ func (j Job) IsEnabled() bool {
 	return j.Enabled == nil || *j.Enabled
 }
 
+// FindJob returns a pointer to the job with the given name, or nil if not found.
+func (c *Config) FindJob(name string) *Job {
+	for i := range c.Jobs {
+		if c.Jobs[i].Name == name {
+			return &c.Jobs[i]
+		}
+	}
+	return nil
+}
+
 // TimeoutDuration parses the timeout string into a time.Duration.
 // Returns 0 if unset or unparsable.
 func (j Job) TimeoutDuration() time.Duration {
@@ -61,4 +71,30 @@ const (
 	DefaultLogMaxSize      = 10 // MB
 	DefaultLogMaxFiles     = 5
 	DefaultShutdownTimeout = "30s"
+)
+
+// Overlap policy constants.
+const (
+	OverlapSkip  = "skip"
+	OverlapAllow = "allow"
+	OverlapQueue = "queue"
+)
+
+// Failure policy constants.
+const (
+	OnFailureRetry = "retry"
+	OnFailureSkip  = "skip"
+	OnFailurePause = "pause"
+)
+
+// Backoff strategy constants.
+const (
+	BackoffExponential = "exponential"
+	BackoffFixed       = "fixed"
+)
+
+// Trigger source constants.
+const (
+	TriggerScheduled = "scheduled"
+	TriggerManual    = "manual"
 )

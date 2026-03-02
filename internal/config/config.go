@@ -88,7 +88,7 @@ func Validate(cfg *Config) []error {
 
 		if j.Overlap != "" {
 			switch j.Overlap {
-			case "skip", "allow", "queue":
+			case OverlapSkip, OverlapAllow, OverlapQueue:
 			default:
 				errs = append(errs, fmt.Errorf("%s (%s): invalid overlap %q (must be skip, allow, or queue)", prefix, j.Name, j.Overlap))
 			}
@@ -96,7 +96,7 @@ func Validate(cfg *Config) []error {
 
 		if j.OnFailure != "" {
 			switch j.OnFailure {
-			case "retry", "skip", "pause":
+			case OnFailureRetry, OnFailureSkip, OnFailurePause:
 			default:
 				errs = append(errs, fmt.Errorf("%s (%s): invalid on_failure %q (must be retry, skip, or pause)", prefix, j.Name, j.OnFailure))
 			}
@@ -104,7 +104,7 @@ func Validate(cfg *Config) []error {
 
 		if j.Backoff != "" {
 			switch j.Backoff {
-			case "exponential", "fixed":
+			case BackoffExponential, BackoffFixed:
 			default:
 				errs = append(errs, fmt.Errorf("%s (%s): invalid backoff %q (must be exponential or fixed)", prefix, j.Name, j.Backoff))
 			}
@@ -122,7 +122,7 @@ func Validate(cfg *Config) []error {
 			}
 		}
 
-		if j.OnFailure == "retry" && j.RetryCount < 0 {
+		if j.OnFailure == OnFailureRetry && j.RetryCount < 0 {
 			errs = append(errs, fmt.Errorf("%s (%s): retry_count must be >= 0 when on_failure is retry", prefix, j.Name))
 		}
 	}

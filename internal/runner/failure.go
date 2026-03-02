@@ -21,11 +21,11 @@ type FailureHandler struct{}
 // Handle runs the job through the configured failure policy.
 func (fh *FailureHandler) Handle(ctx context.Context, job config.Job, run func(context.Context) RunResult) FailureResult {
 	switch job.OnFailure {
-	case "retry":
+	case config.OnFailureRetry:
 		return fh.handleRetry(ctx, job, run)
-	case "pause":
+	case config.OnFailurePause:
 		return fh.handlePause(ctx, run)
-	default: // "skip" or empty
+	default: // skip or empty
 		return FailureResult{RunResult: run(ctx)}
 	}
 }
@@ -78,7 +78,7 @@ func parseBackoffInterval(s string) time.Duration {
 }
 
 func computeBackoff(strategy string, base time.Duration, attempt int) time.Duration {
-	if strategy == "exponential" {
+	if strategy == config.BackoffExponential {
 		return base * time.Duration(math.Pow(2, float64(attempt)))
 	}
 	return base // fixed or default

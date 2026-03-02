@@ -25,9 +25,9 @@ var rootCmd = &cobra.Command{
 			os.Setenv("NO_COLOR", "1")
 		}
 
-		// Skip config loading for commands that don't need it.
+		// Skip config loading for commands that manage their own config.
 		switch cmd.Name() {
-		case "version", "init":
+		case "version", "init", "doctor", "edit":
 			return nil
 		}
 
