@@ -1,0 +1,26 @@
+# kronos
+
+> Cross-platform cron job manager. Single binary replaces crontab, launchd, and Task Scheduler.
+
+## Install
+
+go install github.com/zhenchaochen/kronos@latest
+
+## Quick Start
+
+kronos init                    # create config
+kronos edit                    # customize jobs
+kronos start                   # run scheduler
+
+## Docs
+
+- [Getting Started](./getting-started.md)
+- [Configuration Reference](./configuration.md)
+- [Command Reference](./commands.md)
+- [Daemon & Platforms](./daemon-and-platforms.md)
+- [Import & Export](./import-export.md)
+- [Troubleshooting](./troubleshooting.md)
+
+## Optional
+
+- [Full Documentation (single file)](./llms-full.txt)
