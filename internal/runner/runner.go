@@ -3,6 +3,7 @@ package runner
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"os"
 	"os/exec"
@@ -68,7 +69,8 @@ func (r *Runner) Run(ctx context.Context, job config.Job) RunResult {
 	result.Output = string(output)
 
 	if result.Error != nil {
-		if exitErr, ok := result.Error.(*exec.ExitError); ok {
+		var exitErr *exec.ExitError
+		if errors.As(result.Error, &exitErr) {
 			result.ExitCode = exitErr.ExitCode()
 		} else {
 			result.ExitCode = -1

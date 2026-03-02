@@ -7,7 +7,7 @@ import (
 	"github.com/zhenchaochen/kronos/internal/store"
 )
 
-// p95Index is the percentile used for duration calculation.
+// p95Percentile is the percentile used for duration calculation.
 const p95Percentile = 0.95
 
 // unlimitedRecords signals GetRuns to return all records.

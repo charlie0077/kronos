@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -64,7 +65,7 @@ var logsCmd = &cobra.Command{
 func followLog(path string) error {
 	f, err := os.Open(path)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if errors.Is(err, os.ErrNotExist) {
 			// File doesn't exist yet; create watcher and wait for it.
 			f = nil
 		} else {
@@ -168,7 +169,7 @@ func readNewBytes(f *os.File, offset int64, buf []byte) (int64, error) {
 			offset += int64(n)
 		}
 		if err != nil {
-			if err == io.EOF {
+			if errors.Is(err, io.EOF) {
 				break
 			}
 			return offset, err

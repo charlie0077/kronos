@@ -1,6 +1,7 @@
 package store
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -47,7 +48,7 @@ func (l *PIDLock) Release() error {
 func (l *PIDLock) IsLocked() (bool, int, error) {
 	data, err := os.ReadFile(l.path)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if errors.Is(err, os.ErrNotExist) {
 			return false, 0, nil
 		}
 		return false, 0, fmt.Errorf("reading pid file: %w", err)
