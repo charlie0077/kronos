@@ -1413,3 +1413,294 @@ Phases are independent with one caveat: **Phase 10 and 11 both modify `internal/
 ## Verification per Phase
 
 Each phase: `go build ./...` + `go test ./...` must pass before moving on.
+
+---
+
+## Phase 12: Documentation — Getting Started & Configuration
+
+**Goal:** Create the foundational doc files that cover installation, first-run experience, and the full configuration reference.
+
+### Create `docs/getting-started.md` (~80 lines)
+
+Sections:
+
+1. **Install** — `go install github.com/zhenchaochen/kronos@latest` + binary download from GitHub Releases
+2. **Quick Start** — three-step walkthrough:
+   - `kronos init` → creates `~/.config/kronos/kronos.yaml` with sample "hello" job
+   - Edit the config (`kronos edit` or open directly)
+   - `kronos start` → runs scheduler in foreground
+3. **Interactive Mode** — `kronos start --tui` with description of the 3 tabs (Jobs, Logs, History)
+4. **Validate Setup** — `kronos doctor` with example output showing OK/WARN/FAIL checks
+5. **Run as Service** — `kronos daemon install` (brief, links to daemon-and-platforms.md)
+
+### Create `docs/configuration.md` (~150 lines)
+
+Sections:
+
+1. **File Location** — default paths by OS:
+   - macOS/Linux: `~/.config/kronos/kronos.yaml`
+   - Windows: `%APPDATA%/kronos/kronos.yaml`
+   - Override: `--config` / `-f` flag or `KRONOS_CONFIG` env var
+
+2. **Complete Example** — fully annotated `kronos.yaml` showing every field:
+
+```yaml
+jobs:
+  - name: backup-db                      # required, must be unique
+    description: "Backs up the database" # optional
+    cmd: pg_dump mydb > /backups/db.sql  # required
+    schedule: "@daily"                   # required, cron or descriptor
+    dir: /opt/myapp                      # optional, working directory
+    shell: bash                          # optional, shell interpreter
+    enabled: true                        # optional, default: true
+    once: false                          # optional, run once then disable
+    timeout: 30m                         # optional, Go duration
+    overlap: skip                        # optional: skip|allow|queue
+    on_failure: retry                    # optional: retry|skip|pause
+    retry_count: 3                       # optional, used with retry
+    backoff: exponential                 # optional: exponential|fixed
+    backoff_interval: 5s                 # optional, base interval
+    tags: [db, prod]                     # optional, for filtering
+    env:                                 # optional, env vars
+      PGPASSWORD: secret123
+
+settings:
+  history_limit: 100                     # runs kept in DB per job
+  log_dir: ""                            # empty = OS default
+  log_max_size: 10                       # MB per log file
+  log_max_files: 5                       # rotated log files
+  shutdown_timeout: 30s                  # graceful stop timeout
+```
+
+3. **Schedule Format** — table of formats:
+   - 5-field cron: `minute hour day-of-month month day-of-week`
+   - Descriptors: `@yearly`, `@monthly`, `@weekly`, `@daily`, `@hourly`
+   - Interval: `@every 5m`, `@every 1h30m`
+
+4. **Overlap Policies** — `skip` (default, skip if running), `allow` (parallel), `queue` (buffer size 1)
+
+5. **Failure Policies** — `retry` (with backoff), `skip` (ignore), `pause` (disable job)
+
+6. **Data Paths** — table of all file paths:
+   - Config, DB (`~/.cache/kronos/kronos.db`), logs (`~/.cache/kronos/logs/`), PID lock
+
+### Verify
+
+- All fields match `internal/config/model.go`
+- Default values match `internal/config/config.go` (Validate function defaults)
+- Paths match `internal/config/paths.go`
+
+---
+
+## Phase 13: Documentation — Command Reference
+
+**Goal:** Document all 19 commands with flags, examples, and notes in a single self-contained file.
+
+### Create `docs/commands.md` (~400 lines)
+
+Structure — start with global flags, then one section per command in logical groups:
+
+**Global Flags:**
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--config` / `-f` | string | `~/.config/kronos/kronos.yaml` | Config file path |
+| `--no-color` | bool | `false` | Disable color output |
+| `--json` | bool | `false` | Machine-readable JSON output |
+
+**Commands (grouped):**
+
+1. **Setup**: `init`, `doctor`, `edit`
+2. **Job Management**: `add`, `remove`, `enable`, `disable`, `pause-all`, `resume-all`
+3. **Execution**: `start`, `run`, `daemon` (+ `install` / `uninstall`)
+4. **Monitoring**: `status`, `logs`
+5. **Data**: `list`, `export`, `import`, `prune`
+6. **Maintenance**: `update`, `version`
+
+Each command section follows this template:
+
+```markdown
+### kronos <command>
+
+<one-line description>
+
+Usage: `kronos <command> [flags]`
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| ... | ... | ... | ... |
+
+Examples:
+\`\`\`bash
+kronos <command> ...
+\`\`\`
+
+Notes:
+- ...
+```
+
+Source of truth: each file in `cmd/` directory. Every flag registered in `init()` or `Flags()` calls must be documented.
+
+### Verify
+
+- Count: exactly 19 commands documented (init, add, remove, edit, list, status, run, enable, disable, pause-all, resume-all, start, daemon, daemon install, daemon uninstall, doctor, export, import, prune, logs, update, version)
+- Every flag from every `cmd/*.go` file is present
+- Examples are runnable commands
+
+---
+
+## Phase 14: Documentation — Platform, Import/Export & Troubleshooting
+
+**Goal:** Document OS-specific daemon behavior, data interchange formats, and common issues.
+
+### Create `docs/daemon-and-platforms.md` (~120 lines)
+
+Sections:
+
+1. **Running Kronos** — foreground (`kronos start`) vs background (`kronos daemon`) vs OS service (`kronos daemon install`)
+2. **macOS (launchd):**
+   - Install: creates `~/Library/LaunchAgents/com.kronos.agent.plist`
+   - Starts at login via `RunAtLoad`, auto-restarts via `KeepAlive`
+   - Uninstall: removes plist, runs `launchctl unload`
+3. **Linux (systemd):**
+   - Install: creates `~/.config/systemd/user/kronos.service`
+   - Enables via `systemctl --user enable kronos`
+   - Restart on failure with 5s delay
+   - Uninstall: stops, disables, removes unit file
+4. **Windows (Task Scheduler):**
+   - Install: creates `KronosScheduler` task via `schtasks`
+   - Triggers at user logon, runs at limited privilege
+   - Uninstall: deletes scheduled task
+5. **Single Instance** — PID lock at `~/.cache/kronos/kronos.pid`, stale PID detection
+
+Source: `internal/platform/launchd.go`, `systemd.go`, `schtasks.go`, `daemon_unix.go`, `daemon_windows.go`, `detect.go`
+
+### Create `docs/import-export.md` (~100 lines)
+
+Sections:
+
+1. **Export** — `kronos export --format <fmt> [-o file]`
+   - **crontab**: standard 5-field format, skips disabled jobs, descriptor mapping table (`@daily` → `0 0 * * *`, etc.), warns on `@every`
+   - **launchd**: one plist per job, uses `StartCalendarInterval` or `StartInterval`
+   - **systemd**: `.timer` + `.service` units per job, uses `OnCalendar` or `OnUnitActiveSec`
+   - Example output snippets for each format
+2. **Import** — `kronos import --from crontab [--file path]`
+   - Reads from file or stdin (`crontab -l | kronos import`)
+   - Auto-generates job names from command basename
+   - Picks up `KEY=VALUE` env var lines
+   - Skips `@reboot` with warning
+   - Handles system crontab (6-field with username)
+   - Deduplicates by name, skips existing jobs
+3. **Limitations** — `@every` not exportable to crontab, `@reboot` not importable, only crontab import currently supported
+
+Source: `internal/export/crontab.go`, `launchd.go`, `systemd.go`, `constants.go`; `internal/importer/crontab.go`, `merge.go`
+
+### Create `docs/troubleshooting.md` (~80 lines)
+
+Sections:
+
+1. **Doctor Checks** — what each check means and how to fix failures:
+   - Config file not found → run `kronos init`
+   - YAML parse error → check syntax, run `kronos edit` for validation
+   - Job validation failure → specific field errors
+   - Command not in PATH → install the tool or use absolute path
+   - Log/cache directory not writable → check permissions
+   - Another instance running → stop it or check stale PID
+
+2. **Common Issues:**
+   - "Permission denied" on daemon install → explain per-platform
+   - Jobs not running → check `enabled`, schedule syntax, `kronos status`
+   - Logs missing → check `settings.log_dir`, default paths
+   - High disk usage → `kronos prune --older-than 30d`
+
+3. **FAQ:**
+   - How do I run kronos at login? → `kronos daemon install`
+   - Where are my logs? → `~/.cache/kronos/logs/` or `settings.log_dir`
+   - How do I migrate from crontab? → `crontab -l | kronos import`
+   - How do I back up my jobs? → `kronos export --format crontab -o backup.cron`
+   - Can I run multiple instances? → No, PID lock prevents it
+
+Source: `cmd/doctor.go`, common patterns from all commands
+
+### Verify
+
+- Platform details match `internal/platform/` implementations
+- Export format descriptions match `internal/export/` code
+- Import behavior matches `internal/importer/` code
+- Doctor checks match `cmd/doctor.go`
+
+---
+
+## Phase 15: Documentation — LLM Index Files
+
+**Goal:** Create the two-tier `llms.txt` entry points that tie all documentation together.
+
+### Create `docs/llms.txt` (~50 lines)
+
+Structure:
+
+```markdown
+# kronos
+
+> Cross-platform cron job manager. Single binary replaces crontab, launchd, and Task Scheduler.
+
+## Install
+
+go install github.com/zhenchaochen/kronos@latest
+
+## Quick Start
+
+kronos init                    # create config
+kronos edit                    # customize jobs
+kronos start                   # run scheduler
+
+## Docs
+
+- [Getting Started](./getting-started.md)
+- [Configuration Reference](./configuration.md)
+- [Command Reference](./commands.md)
+- [Daemon & Platforms](./daemon-and-platforms.md)
+- [Import & Export](./import-export.md)
+- [Troubleshooting](./troubleshooting.md)
+
+## Optional
+
+- [Full Documentation (single file)](./llms-full.txt)
+```
+
+### Create `docs/llms-full.txt` (~900 lines)
+
+- Concatenation of all 6 detail `.md` files in order:
+  1. getting-started.md
+  2. configuration.md
+  3. commands.md
+  4. daemon-and-platforms.md
+  5. import-export.md
+  6. troubleshooting.md
+- Each section separated by `---` and a heading comment
+- This is the "give me everything in one shot" file for LLMs with large context windows
+
+### Verify
+
+- All links in `llms.txt` resolve to existing files
+- `llms-full.txt` contains all content from the 6 detail files
+- Total line count of `llms-full.txt` is under 1500 lines (fits in a single LLM context)
+
+---
+
+## File Summary (Phases 12–15)
+
+| Phase | New Files |
+|-------|-----------|
+| 12 | `docs/getting-started.md`, `docs/configuration.md` |
+| 13 | `docs/commands.md` |
+| 14 | `docs/daemon-and-platforms.md`, `docs/import-export.md`, `docs/troubleshooting.md` |
+| 15 | `docs/llms.txt`, `docs/llms-full.txt` |
+
+## Dependency Order (Phases 12–15)
+
+Phases 12, 13, and 14 are fully independent — they can be written in any order. **Phase 15 depends on all three** because it concatenates their output into `llms-full.txt`.
+
+## Verification per Phase
+
+Each phase: review generated docs against source code files listed in each section. Confirm all fields, flags, and behaviors match the implementation.
