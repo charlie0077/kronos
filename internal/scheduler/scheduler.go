@@ -53,7 +53,10 @@ func New(r *runner.Runner, s *store.Store, l *logger.Manager) *Scheduler {
 }
 
 // SetOnUpdate sets a callback invoked after a job finishes (for TUI refresh).
+// Must be called before Start.
 func (s *Scheduler) SetOnUpdate(fn func(string)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.onUpdate = fn
 }
 
@@ -117,8 +120,11 @@ func (s *Scheduler) makeJobFunc(job config.Job) func() {
 			s.handleOnceJob(job.Name)
 		}
 
-		if s.onUpdate != nil {
-			s.onUpdate(job.Name)
+		s.mu.Lock()
+		fn := s.onUpdate
+		s.mu.Unlock()
+		if fn != nil {
+			fn(job.Name)
 		}
 	}
 }
@@ -162,8 +168,11 @@ func (s *Scheduler) RunJob(name string) error {
 	record := newRunRecord(job.Name, result, config.TriggerManual)
 	_ = s.store.SaveRun(record)
 
-	if s.onUpdate != nil {
-		s.onUpdate(name)
+	s.mu.Lock()
+	fn := s.onUpdate
+	s.mu.Unlock()
+	if fn != nil {
+		fn(name)
 	}
 
 	if result.Error != nil {

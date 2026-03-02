@@ -8,15 +8,20 @@ import (
 	"syscall"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
 	"github.com/zhenchaochen/kronos/internal/config"
 	"github.com/zhenchaochen/kronos/internal/logger"
 	"github.com/zhenchaochen/kronos/internal/runner"
 	"github.com/zhenchaochen/kronos/internal/scheduler"
 	"github.com/zhenchaochen/kronos/internal/store"
+	"github.com/zhenchaochen/kronos/internal/ui"
 )
 
+var tuiMode bool
+
 func init() {
+	startCmd.Flags().BoolVar(&tuiMode, "tui", false, "launch interactive terminal UI")
 	rootCmd.AddCommand(startCmd)
 }
 
@@ -51,25 +56,62 @@ var startCmd = &cobra.Command{
 			return fmt.Errorf("loading jobs: %w", err)
 		}
 
-		sched.Start()
-		fmt.Printf("Kronos started with %d job(s). Press Ctrl+C to stop.\n", len(cfg.Jobs))
-
-		// Wait for signal.
-		sigCh := make(chan os.Signal, 1)
-		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-		<-sigCh
-
-		fmt.Println("\nShutting down...")
-
-		shutdownTimeout, err := time.ParseDuration(cfg.Settings.ShutdownTimeout)
-		if err != nil {
-			shutdownTimeout = 30 * time.Second
+		if tuiMode {
+			return runTUI(sched, db, logMgr, cfg)
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
-		defer cancel()
-
-		sched.Stop(ctx)
-		fmt.Println("Stopped.")
-		return nil
+		return runHeadless(sched, cfg)
 	},
+}
+
+func runTUI(sched *scheduler.Scheduler, db *store.Store, logMgr *logger.Manager, c *config.Config) error {
+	ui.InitStyles(noColor)
+	model := ui.NewModel(sched, db, logMgr, c)
+
+	p := tea.NewProgram(model, tea.WithAltScreen())
+
+	// Wire scheduler updates to TUI refresh before starting to avoid race.
+	sched.SetOnUpdate(func(_ string) {
+		p.Send(ui.RefreshCmd())
+	})
+	sched.Start()
+
+	if _, err := p.Run(); err != nil {
+		return fmt.Errorf("TUI error: %w", err)
+	}
+
+	// Graceful shutdown.
+	shutdownTimeout := parseShutdownTimeout(c.Settings.ShutdownTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	defer cancel()
+	sched.Stop(ctx)
+	return nil
+}
+
+func runHeadless(sched *scheduler.Scheduler, c *config.Config) error {
+	sched.Start()
+	fmt.Printf("Kronos started with %d job(s). Press Ctrl+C to stop.\n", len(c.Jobs))
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	<-sigCh
+
+	fmt.Println("\nShutting down...")
+
+	shutdownTimeout := parseShutdownTimeout(c.Settings.ShutdownTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	defer cancel()
+
+	sched.Stop(ctx)
+	fmt.Println("Stopped.")
+	return nil
+}
+
+func parseShutdownTimeout(s string) time.Duration {
+	d, err := time.ParseDuration(s)
+	if err != nil {
+		// Fallback to config default; this shouldn't happen if config validation passed.
+		d, _ = time.ParseDuration(config.DefaultShutdownTimeout)
+		return d
+	}
+	return d
 }
