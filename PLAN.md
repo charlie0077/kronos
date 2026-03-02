@@ -1440,7 +1440,7 @@ Sections:
 1. **File Location** — default paths by OS:
    - macOS/Linux: `~/.config/kronos/kronos.yaml`
    - Windows: `%APPDATA%/kronos/kronos.yaml`
-   - Override: `--config` / `-f` flag or `KRONOS_CONFIG` env var
+   - Override: `--config` / `-f` flag
 
 2. **Complete Example** — fully annotated `kronos.yaml` showing every field:
 
@@ -1477,7 +1477,7 @@ settings:
    - Descriptors: `@yearly`, `@monthly`, `@weekly`, `@daily`, `@hourly`
    - Interval: `@every 5m`, `@every 1h30m`
 
-4. **Overlap Policies** — `skip` (default, skip if running), `allow` (parallel), `queue` (buffer size 1)
+4. **Overlap Policies** — `allow` (default, parallel), `skip` (skip if running), `queue` (buffer size 1)
 
 5. **Failure Policies** — `retry` (with backoff), `skip` (ignore), `pause` (disable job)
 
@@ -1492,9 +1492,9 @@ settings:
 
 ---
 
-## Phase 13: Documentation — Command Reference
+## Phase 13: Documentation — Command Reference [DONE]
 
-**Goal:** Document all 19 commands with flags, examples, and notes in a single self-contained file.
+**Goal:** Document all 22 commands with flags, examples, and notes in a single self-contained file.
 
 ### Create `docs/commands.md` (~400 lines)
 
@@ -1543,7 +1543,7 @@ Source of truth: each file in `cmd/` directory. Every flag registered in `init()
 
 ### Verify
 
-- Count: exactly 19 commands documented (init, add, remove, edit, list, status, run, enable, disable, pause-all, resume-all, start, daemon, daemon install, daemon uninstall, doctor, export, import, prune, logs, update, version)
+- Count: exactly 22 commands documented (init, add, remove, edit, list, status, run, enable, disable, pause-all, resume-all, start, daemon, daemon install, daemon uninstall, doctor, export, import, prune, logs, update, version)
 - Every flag from every `cmd/*.go` file is present
 - Examples are runnable commands
 
