@@ -49,7 +49,7 @@ func (s *Store) GetRuns(jobName string, limit int) ([]RunRecord, error) {
 		c.Seek(end)
 		k, v := c.Prev()
 
-		for k != nil && len(records) < limit {
+		for k != nil && (limit <= 0 || len(records) < limit) {
 			if !strings.HasPrefix(string(k), prefix) {
 				break
 			}
@@ -72,7 +72,7 @@ func (s *Store) GetAllRuns(limit int) ([]RunRecord, error) {
 		c := b.Cursor()
 
 		// Iterate from the end backwards.
-		for k, v := c.Last(); k != nil && len(records) < limit; k, v = c.Prev() {
+		for k, v := c.Last(); k != nil && (limit <= 0 || len(records) < limit); k, v = c.Prev() {
 			var rec RunRecord
 			if err := json.Unmarshal(v, &rec); err == nil {
 				records = append(records, rec)
