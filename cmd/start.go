@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"os/signal"
 	"syscall"
@@ -16,6 +17,7 @@ import (
 	"github.com/zhenchaochen/kronos/internal/scheduler"
 	"github.com/zhenchaochen/kronos/internal/store"
 	"github.com/zhenchaochen/kronos/internal/ui"
+	"github.com/zhenchaochen/kronos/internal/watcher"
 )
 
 var tuiMode bool
@@ -56,14 +58,16 @@ var startCmd = &cobra.Command{
 			return fmt.Errorf("loading jobs: %w", err)
 		}
 
+		configPath := resolveConfigPath()
+
 		if tuiMode {
-			return runTUI(sched, db, logMgr, cfg)
+			return runTUI(sched, db, logMgr, cfg, configPath)
 		}
-		return runHeadless(sched, cfg)
+		return runHeadless(sched, cfg, configPath)
 	},
 }
 
-func runTUI(sched *scheduler.Scheduler, db *store.Store, logMgr *logger.Manager, c *config.Config) error {
+func runTUI(sched *scheduler.Scheduler, db *store.Store, logMgr *logger.Manager, c *config.Config, configPath string) error {
 	ui.InitStyles(noColor)
 	model := ui.NewModel(sched, db, logMgr, c)
 
@@ -74,6 +78,14 @@ func runTUI(sched *scheduler.Scheduler, db *store.Store, logMgr *logger.Manager,
 		p.Send(ui.RefreshCmd())
 	})
 	sched.Start()
+
+	// Start config hot-reload watcher.
+	w := watcher.New(configPath, sched)
+	if err := w.Start(); err != nil {
+		log.Printf("[watcher] failed to start: %v (hot reload disabled)", err)
+	} else {
+		defer w.Stop()
+	}
 
 	if _, err := p.Run(); err != nil {
 		return fmt.Errorf("TUI error: %w", err)
@@ -87,8 +99,17 @@ func runTUI(sched *scheduler.Scheduler, db *store.Store, logMgr *logger.Manager,
 	return nil
 }
 
-func runHeadless(sched *scheduler.Scheduler, c *config.Config) error {
+func runHeadless(sched *scheduler.Scheduler, c *config.Config, configPath string) error {
 	sched.Start()
+
+	// Start config hot-reload watcher.
+	w := watcher.New(configPath, sched)
+	if err := w.Start(); err != nil {
+		log.Printf("[watcher] failed to start: %v (hot reload disabled)", err)
+	} else {
+		defer w.Stop()
+	}
+
 	fmt.Printf("Kronos started with %d job(s). Press Ctrl+C to stop.\n", len(c.Jobs))
 
 	sigCh := make(chan os.Signal, 1)

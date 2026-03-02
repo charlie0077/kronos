@@ -31,10 +31,7 @@ var rootCmd = &cobra.Command{
 			return nil
 		}
 
-		path := cfgPath
-		if path == "" {
-			path = config.DefaultConfigPath()
-		}
+		path := resolveConfigPath()
 
 		loaded, err := config.Load(path)
 		if err != nil {
@@ -51,6 +48,14 @@ func init() {
 	rootCmd.PersistentFlags().StringVarP(&cfgPath, "config", "f", "", "config file (default: ~/.config/kronos/kronos.yaml)")
 	rootCmd.PersistentFlags().BoolVar(&noColor, "no-color", false, "disable color output")
 	rootCmd.PersistentFlags().BoolVar(&jsonOut, "json", false, "output in JSON format")
+}
+
+// resolveConfigPath returns the explicit config path if set, otherwise the default.
+func resolveConfigPath() string {
+	if cfgPath != "" {
+		return cfgPath
+	}
+	return config.DefaultConfigPath()
 }
 
 func Execute() {
