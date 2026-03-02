@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -118,7 +119,7 @@ func TestValidateDuplicateNames(t *testing.T) {
 	errs := Validate(cfg)
 	found := false
 	for _, e := range errs {
-		if e.Error() != "" {
+		if strings.Contains(e.Error(), "duplicate job name") {
 			found = true
 		}
 	}

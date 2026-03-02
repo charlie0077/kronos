@@ -16,28 +16,22 @@ func Save(path string, cfg *Config, node *yaml.Node) error {
 		return fmt.Errorf("creating config directory: %w", err)
 	}
 
-	var data []byte
+	var target any = cfg
 	if node != nil {
-		var buf bytes.Buffer
-		enc := yaml.NewEncoder(&buf)
-		enc.SetIndent(2)
-		if err := enc.Encode(node); err != nil {
-			return fmt.Errorf("encoding yaml: %w", err)
-		}
-		enc.Close()
-		data = buf.Bytes()
-	} else {
-		var buf bytes.Buffer
-		enc := yaml.NewEncoder(&buf)
-		enc.SetIndent(2)
-		if err := enc.Encode(cfg); err != nil {
-			return fmt.Errorf("encoding yaml: %w", err)
-		}
-		enc.Close()
-		data = buf.Bytes()
+		target = node
 	}
 
-	if err := os.WriteFile(path, data, 0o644); err != nil {
+	var buf bytes.Buffer
+	enc := yaml.NewEncoder(&buf)
+	enc.SetIndent(2)
+	if err := enc.Encode(target); err != nil {
+		return fmt.Errorf("encoding yaml: %w", err)
+	}
+	if err := enc.Close(); err != nil {
+		return fmt.Errorf("closing yaml encoder: %w", err)
+	}
+
+	if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
 		return fmt.Errorf("writing %s: %w", path, err)
 	}
 	return nil

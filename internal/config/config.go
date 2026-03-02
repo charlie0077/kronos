@@ -54,6 +54,10 @@ func ApplyDefaults(cfg *Config) {
 	}
 }
 
+// CronParser is the standard cron parser used across the codebase.
+// It supports Minute | Hour | Dom | Month | Dow | Descriptor.
+var CronParser = cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor)
+
 // Validate checks the config for errors and returns all found.
 func Validate(cfg *Config) []error {
 	var errs []error
@@ -77,8 +81,7 @@ func Validate(cfg *Config) []error {
 		if j.Schedule == "" {
 			errs = append(errs, fmt.Errorf("%s (%s): schedule is required", prefix, j.Name))
 		} else {
-			parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor)
-			if _, err := parser.Parse(j.Schedule); err != nil {
+			if _, err := CronParser.Parse(j.Schedule); err != nil {
 				errs = append(errs, fmt.Errorf("%s (%s): invalid schedule %q: %w", prefix, j.Name, j.Schedule, err))
 			}
 		}
