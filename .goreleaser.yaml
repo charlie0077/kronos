@@ -17,7 +17,7 @@ builds:
       - -X github.com/zhenchaochen/kronos/cmd.date={{.Date}}
 
 archives:
-  - name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Goarch }}"
+  - name_template: "{{ .ProjectName }}_{{ .Version }}_{{ title .Os }}_{{ .Goarch }}"
     format_overrides:
       - goos: windows
         format: zip

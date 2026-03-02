@@ -27,7 +27,7 @@ var rootCmd = &cobra.Command{
 
 		// Skip config loading for commands that manage their own config.
 		switch cmd.Name() {
-		case "version", "init", "doctor", "edit":
+		case "version", "init", "doctor", "edit", "update":
 			return nil
 		}
 
