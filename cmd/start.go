@@ -67,6 +67,18 @@ var startCmd = &cobra.Command{
 	},
 }
 
+// startWatcher creates and starts a config hot-reload watcher. Returns a stop
+// function that the caller should defer. If the watcher fails to start, the
+// returned stop function is a no-op.
+func startWatcher(configPath string, sched *scheduler.Scheduler) (stop func()) {
+	w := watcher.New(configPath, sched)
+	if err := w.Start(); err != nil {
+		log.Printf("[watcher] failed to start: %v (hot reload disabled)", err)
+		return func() {}
+	}
+	return w.Stop
+}
+
 func runTUI(sched *scheduler.Scheduler, db *store.Store, logMgr *logger.Manager, c *config.Config, configPath string) error {
 	ui.InitStyles(noColor)
 	model := ui.NewModel(sched, db, logMgr, c)
@@ -78,14 +90,7 @@ func runTUI(sched *scheduler.Scheduler, db *store.Store, logMgr *logger.Manager,
 		p.Send(ui.RefreshCmd())
 	})
 	sched.Start()
-
-	// Start config hot-reload watcher.
-	w := watcher.New(configPath, sched)
-	if err := w.Start(); err != nil {
-		log.Printf("[watcher] failed to start: %v (hot reload disabled)", err)
-	} else {
-		defer w.Stop()
-	}
+	defer startWatcher(configPath, sched)()
 
 	if _, err := p.Run(); err != nil {
 		return fmt.Errorf("TUI error: %w", err)
@@ -101,14 +106,7 @@ func runTUI(sched *scheduler.Scheduler, db *store.Store, logMgr *logger.Manager,
 
 func runHeadless(sched *scheduler.Scheduler, c *config.Config, configPath string) error {
 	sched.Start()
-
-	// Start config hot-reload watcher.
-	w := watcher.New(configPath, sched)
-	if err := w.Start(); err != nil {
-		log.Printf("[watcher] failed to start: %v (hot reload disabled)", err)
-	} else {
-		defer w.Stop()
-	}
+	defer startWatcher(configPath, sched)()
 
 	fmt.Printf("Kronos started with %d job(s). Press Ctrl+C to stop.\n", len(c.Jobs))
 

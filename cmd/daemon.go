@@ -26,13 +26,7 @@ var daemonCmd = &cobra.Command{
 			return fmt.Errorf("resolving executable path: %w", err)
 		}
 
-		// Resolve the config path for the child process.
-		configPath := cfgPath
-		if configPath == "" {
-			configPath = config.DefaultConfigPath()
-		}
-
-		childArgs := []string{"start", "-f", configPath}
+		childArgs := []string{"start", "-f", resolveConfigPath()}
 		pid, err := platform.Daemonize(exe, childArgs)
 		if err != nil {
 			return err
@@ -52,10 +46,7 @@ var daemonInstallCmd = &cobra.Command{
 			return fmt.Errorf("resolving executable path: %w", err)
 		}
 
-		configPath := cfgPath
-		if configPath == "" {
-			configPath = config.DefaultConfigPath()
-		}
+		configPath := resolveConfigPath()
 
 		p := platform.Detect()
 		switch p {

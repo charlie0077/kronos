@@ -1,0 +1,31 @@
+version: 2
+
+builds:
+  - env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X github.com/zhenchaochen/kronos/cmd.version={{.Version}}
+      - -X github.com/zhenchaochen/kronos/cmd.commit={{.ShortCommit}}
+      - -X github.com/zhenchaochen/kronos/cmd.date={{.Date}}
+
+archives:
+  - name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Goarch }}"
+    format_overrides:
+      - goos: windows
+        format: zip
+
+checksum:
+  name_template: checksums.txt
+
+release:
+  github:
+    owner: zhenchaochen
+    name: kronos
