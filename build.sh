@@ -5,6 +5,21 @@ cd "$(dirname "$0")"
 PROJECT_DIR="$(pwd)"
 PLAN_FILE="$PROJECT_DIR/PLAN.md"
 
+# Permission mode:
+#   "safe" = --allowedTools whitelist (default, uses existing claude CLI login)
+#   "skip" = --dangerously-skip-permissions (no safety net, bare metal)
+PERMISSION_MODE="${PERMISSION_MODE:-safe}"
+
+ALLOWED_TOOLS="Read,Write,Edit,Glob,Grep,Bash(go *),Bash(mkdir *),Bash(ls *)"
+
+if [[ "$PERMISSION_MODE" == "skip" ]]; then
+  echo -e "WARNING: Running with --dangerously-skip-permissions (full machine access)"
+  CLAUDE_FLAGS=(--dangerously-skip-permissions)
+else
+  echo -e "Running in safe mode (allowedTools whitelist)"
+  CLAUDE_FLAGS=(--allowedTools "$ALLOWED_TOOLS")
+fi
+
 # Colors
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -155,8 +170,8 @@ run_review_loop() {
   local phase_num=$1
   echo -e "${CYAN}--- Running /rl review+fix loop for Phase $phase_num ---${NC}"
 
-  claude --print --verbose \
-    "/rl" \
+  claude "${CLAUDE_FLAGS[@]}" --verbose \
+    -p "/rl" \
     2>&1 | tee "$PROJECT_DIR/.phase${phase_num}.rl.log"
 
   echo -e "${GREEN}Review loop complete for Phase $phase_num${NC}"
@@ -188,15 +203,15 @@ for i in $(seq "$START_PHASE" "$END_PHASE"); do
   echo ""
 
   # Step 1: Implement the phase
-  echo -e "${CYAN}[1/3] Implementing...${NC}"
-  claude --print --verbose \
-    "${PROMPTS[$idx]}" \
+  echo -e "${CYAN}[1/5] Implementing...${NC}"
+  claude "${CLAUDE_FLAGS[@]}" --verbose \
+    -p "${PROMPTS[$idx]}" \
     2>&1 | tee "$PROJECT_DIR/.phase${i}.log"
 
   echo ""
 
   # Step 2: Verify build + tests
-  echo -e "${CYAN}[2/3] Verifying...${NC}"
+  echo -e "${CYAN}[2/5] Verifying...${NC}"
   verify_phase "$i"
   echo ""
 

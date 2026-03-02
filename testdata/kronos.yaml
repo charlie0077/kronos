@@ -1,0 +1,34 @@
+# Test fixture for Kronos
+jobs:
+  - name: backup-db
+    description: "Backs up the production database"
+    cmd: pg_dump mydb > /backups/db.sql
+    schedule: "@daily"
+    dir: /opt/myapp
+    shell: bash
+    enabled: true
+    timeout: 30m
+    overlap: skip
+    on_failure: retry
+    retry_count: 3
+    backoff: exponential
+    backoff_interval: 5s
+    tags: [db, prod]
+    env:
+      PGPASSWORD: secret123
+
+  - name: cleanup
+    cmd: rm -rf /tmp/old-*
+    schedule: "0 2 * * *"
+    description: "Clean temp files"
+    tags: [ops]
+
+  - name: hello
+    cmd: echo "Hello from Kronos!"
+    schedule: "@every 1m"
+
+settings:
+  history_limit: 50
+  log_max_size: 5
+  log_max_files: 3
+  shutdown_timeout: 15s
