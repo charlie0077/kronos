@@ -35,7 +35,7 @@ func ToCrontab(jobs []config.Job) (string, error) {
 		b.WriteString(fmt.Sprintf("# kronos: %s\n", j.Name))
 
 		if strings.HasPrefix(schedule, "@every ") {
-			b.WriteString(fmt.Sprintf("# WARNING: @every not supported in cron\n"))
+			b.WriteString("# WARNING: @every not supported in cron\n")
 			b.WriteString(fmt.Sprintf("# %s %s\n", schedule, cmd))
 		} else if mapped, ok := cronDescriptors[schedule]; ok {
 			b.WriteString(fmt.Sprintf("%s %s\n", mapped, cmd))

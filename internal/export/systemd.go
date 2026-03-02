@@ -165,21 +165,7 @@ func cronToSystemdCalendar(expr string) (string, error) {
 		dowPart = dowToSystemd(dow) + " "
 	}
 
-	// Build the date-time portion: YYYY-MM-DD HH:MM:SS
-	monthStr := month
-	if monthStr == "*" {
-		monthStr = "*"
-	}
-	domStr := dom
-	if domStr == "*" {
-		domStr = "*"
-	}
-	hourStr := hour
-	if hourStr == "*" {
-		hourStr = "*"
-	}
-
-	return fmt.Sprintf("%s*-%s-%s %s:%s:00", dowPart, monthStr, domStr, hourStr, minute), nil
+	return fmt.Sprintf("%s*-%s-%s %s:%s:00", dowPart, month, dom, hour, minute), nil
 }
 
 // dowToSystemd converts cron day-of-week values to systemd names.

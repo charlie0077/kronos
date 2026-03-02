@@ -92,11 +92,11 @@ func ParseCrontab(r io.Reader) ([]ParsedJob, []string, error) {
 func parseCrontabLine(line string) (schedule, cmd string, ok bool) {
 	// Handle shorthand descriptors like @daily, @hourly, etc.
 	if strings.HasPrefix(line, "@") {
-		parts := strings.SplitN(line, " ", 2)
-		if len(parts) < 2 {
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
 			return "", "", false
 		}
-		return parts[0], strings.TrimSpace(parts[1]), true
+		return fields[0], strings.TrimSpace(line[len(fields[0]):]), true
 	}
 
 	fields := strings.Fields(line)

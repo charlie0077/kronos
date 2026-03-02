@@ -40,7 +40,11 @@ func (l *Logger) Close() error {
 }
 
 // Tail returns the last n lines from the log file.
+// It uses a ring buffer to avoid loading the entire file into memory.
 func (l *Logger) Tail(n int) ([]string, error) {
+	if n <= 0 {
+		return nil, nil
+	}
 	f, err := os.Open(l.path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -50,16 +54,31 @@ func (l *Logger) Tail(n int) ([]string, error) {
 	}
 	defer f.Close()
 
-	var lines []string
+	ring := make([]string, n)
+	total := 0
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
-		lines = append(lines, scanner.Text())
+		ring[total%n] = scanner.Text()
+		total++
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
 	}
 
-	if len(lines) > n {
-		lines = lines[len(lines)-n:]
+	if total == 0 {
+		return nil, nil
 	}
-	return lines, scanner.Err()
+
+	count := total
+	if count > n {
+		count = n
+	}
+	result := make([]string, count)
+	start := total - count
+	for i := 0; i < count; i++ {
+		result[i] = ring[(start+i)%n]
+	}
+	return result, nil
 }
 
 // NewReadOnlyLogger returns a Logger with name and path set but writer left nil.

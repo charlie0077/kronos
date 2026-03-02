@@ -103,6 +103,8 @@ func followLog(path string) error {
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	defer signal.Stop(sigCh)
 
+	buf := make([]byte, readBufSize)
+
 	for {
 		select {
 		case <-sigCh:
@@ -117,8 +119,7 @@ func followLog(path string) error {
 			}
 
 			// Only care about writes (or creates) to our log file.
-			isTarget := event.Name == path
-			if !isTarget {
+			if event.Name != path {
 				continue
 			}
 
@@ -138,7 +139,7 @@ func followLog(path string) error {
 				continue
 			}
 
-			offset, err = readNewBytes(f, offset)
+			offset, err = readNewBytes(f, offset, buf)
 			if err != nil {
 				return fmt.Errorf("reading new log data: %w", err)
 			}
@@ -154,12 +155,12 @@ func followLog(path string) error {
 
 // readNewBytes reads any new content from the file starting at offset,
 // prints complete lines to stdout, and returns the updated offset.
-func readNewBytes(f *os.File, offset int64) (int64, error) {
+// The caller-provided buf is reused across calls to avoid per-event allocation.
+func readNewBytes(f *os.File, offset int64, buf []byte) (int64, error) {
 	if _, err := f.Seek(offset, io.SeekStart); err != nil {
 		return offset, err
 	}
 
-	buf := make([]byte, readBufSize)
 	for {
 		n, err := f.Read(buf)
 		if n > 0 {
