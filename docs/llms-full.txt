@@ -1,0 +1,1498 @@
+# Getting Started
+
+## Install
+
+### From source (requires Go 1.23+)
+
+```bash
+go install github.com/zhenchaochen/kronos@latest
+```
+
+### Binary download
+
+Download the latest release for your platform from
+[GitHub Releases](https://github.com/zhenchaochen/kronos/releases)
+and place the binary in your `PATH`.
+
+## Quick Start
+
+Three steps to your first scheduled job:
+
+### 1. Create a config file
+
+```bash
+kronos init
+```
+
+This writes a starter config to `~/.config/kronos/kronos.yaml` containing a
+sample "hello" job that runs every minute:
+
+```yaml
+jobs:
+  - name: hello
+    cmd: echo "Hello from Kronos!"
+    schedule: "@every 1m"
+    description: "A sample job — edit or remove me"
+
+settings:
+  history_limit: 100
+  log_max_size: 10
+  log_max_files: 5
+  shutdown_timeout: 30s
+```
+
+### 2. Edit the config
+
+Open the config in your `$EDITOR` (falls back to `vi` on Unix, `notepad` on
+Windows):
+
+```bash
+kronos edit
+```
+
+Or open the file directly in any editor. When using `kronos edit`, the config
+is validated on save — if there are errors you are prompted to re-edit.
+
+### 3. Start the scheduler
+
+```bash
+kronos start
+```
+
+Kronos runs in the foreground, executing jobs on their schedules. Press
+`Ctrl+C` to stop gracefully.
+
+## Interactive Mode
+
+Launch the terminal UI with:
+
+```bash
+kronos start --tui
+```
+
+The TUI has three tabs (switch with `Tab` / `Shift+Tab`):
+
+| Tab | Description |
+|-----|-------------|
+| **Jobs** | Live view of all jobs with status, next run, and last result. Press `r` to run a job manually, `e`/`d` to enable/disable, `p`/`R` to pause/resume all. |
+| **Logs** | Streaming output for the selected job. |
+| **History** | Run history with timestamps, durations, and exit codes. |
+
+Press `q` or `Ctrl+C` to quit.
+
+## Validate Setup
+
+Run the built-in health checker:
+
+```bash
+kronos doctor
+```
+
+Example output:
+
+```
+ [OK]   Config file found: /home/user/.config/kronos/kronos.yaml
+ [OK]   Config is valid (3 jobs)
+ [OK]   All jobs pass validation
+ [OK]   Job "backup-db": pg_dump found in PATH
+ [WARN] Job "deploy": rsync not found in PATH
+ [OK]   Log directory writable: /home/user/.cache/kronos/logs
+ [OK]   Cache directory writable: /home/user/.cache/kronos
+ [OK]   No other instance running
+```
+
+Each check reports `[OK]`, `[WARN]`, or `[FAIL]`. Fix any failures before
+starting the scheduler.
+
+## Run as a Service
+
+Install Kronos as an OS-native service so it starts automatically at login:
+
+```bash
+kronos daemon install
+```
+
+This creates the appropriate service entry for your platform (launchd on
+macOS, systemd on Linux, Task Scheduler on Windows). See
+[Daemon & Platforms](./daemon-and-platforms.md) for details.
+
+To remove the service:
+
+```bash
+kronos daemon uninstall
+```
+---
+<!-- Section: Configuration Reference -->
+# Configuration Reference
+
+## File Location
+
+Kronos looks for its config file at the OS-native config directory:
+
+| OS | Default Path |
+|----|-------------|
+| macOS / Linux | `~/.config/kronos/kronos.yaml` |
+| Windows | `%APPDATA%/kronos/kronos.yaml` |
+
+Override with the `--config` (or `-f`) flag on any command:
+
+```bash
+kronos start --config /path/to/custom.yaml
+kronos start -f /path/to/custom.yaml
+```
+
+## Complete Example
+
+A fully annotated `kronos.yaml` showing every available field:
+
+```yaml
+jobs:
+  - name: backup-db                      # required, must be unique
+    description: "Backs up the database" # optional
+    cmd: pg_dump mydb > /backups/db.sql  # required, shell command to run
+    schedule: "@daily"                   # required, cron expression or descriptor
+    dir: /opt/myapp                      # optional, working directory
+    shell: bash                          # optional, shell interpreter
+    enabled: true                        # optional, default: true
+    once: false                          # optional, run once then disable
+    timeout: 30m                         # optional, Go duration (e.g. 30s, 5m, 1h)
+    overlap: skip                        # optional: skip | allow | queue
+    on_failure: retry                    # optional: retry | skip | pause
+    retry_count: 3                       # optional, used when on_failure is retry
+    backoff: exponential                 # optional: exponential | fixed
+    backoff_interval: 5s                 # optional, base interval for backoff
+    tags: [db, prod]                     # optional, for filtering
+    env:                                 # optional, environment variables
+      PGPASSWORD: secret123
+
+settings:
+  history_limit: 100                     # runs kept in DB per job (default: 100)
+  log_dir: ""                            # empty = OS default cache dir
+  log_max_size: 10                       # MB per log file (default: 10)
+  log_max_files: 5                       # rotated log files kept (default: 5)
+  shutdown_timeout: 30s                  # graceful stop timeout (default: 30s)
+```
+
+## Job Fields
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `name` | string | yes | — | Unique identifier for the job |
+| `description` | string | no | `""` | Human-readable description |
+| `cmd` | string | yes | — | Shell command to execute |
+| `schedule` | string | yes | — | Cron expression or descriptor |
+| `dir` | string | no | `""` | Working directory for the command |
+| `shell` | string | no | `""` | Shell interpreter (e.g. `bash`, `sh`, `zsh`) |
+| `enabled` | bool | no | `true` | Whether the job is active |
+| `once` | bool | no | `false` | Run once then auto-disable |
+| `timeout` | duration | no | `""` (none) | Kill the job after this duration |
+| `overlap` | string | no | `"allow"` | Overlap policy (see below) |
+| `on_failure` | string | no | `""` | Failure policy (see below) |
+| `retry_count` | int | no | `0` | Max retries when `on_failure` is `retry` |
+| `backoff` | string | no | `""` | Backoff strategy: `exponential` or `fixed` |
+| `backoff_interval` | duration | no | `""` | Base interval between retries |
+| `tags` | list | no | `[]` | Arbitrary tags for filtering |
+| `env` | map | no | `{}` | Environment variables passed to the command |
+
+## Schedule Format
+
+Kronos uses the [robfig/cron](https://pkg.go.dev/github.com/robfig/cron/v3)
+parser with support for the following formats:
+
+### 5-field cron
+
+```
+minute  hour  day-of-month  month  day-of-week
+  *       *        *          *         *
+```
+
+Examples:
+
+| Expression | Meaning |
+|-----------|---------|
+| `0 * * * *` | Every hour at minute 0 |
+| `30 2 * * *` | Daily at 02:30 |
+| `0 9 * * 1-5` | Weekdays at 09:00 |
+| `*/15 * * * *` | Every 15 minutes |
+
+### Descriptors
+
+| Descriptor | Equivalent Cron |
+|-----------|----------------|
+| `@yearly` (or `@annually`) | `0 0 1 1 *` |
+| `@monthly` | `0 0 1 * *` |
+| `@weekly` | `0 0 * * 0` |
+| `@daily` (or `@midnight`) | `0 0 * * *` |
+| `@hourly` | `0 * * * *` |
+
+### Interval
+
+Run at a fixed interval from the time the scheduler starts:
+
+```
+@every <duration>
+```
+
+Examples: `@every 5m`, `@every 1h30m`, `@every 30s`
+
+## Overlap Policies
+
+Controls what happens when a job is scheduled to run while a previous
+execution is still in progress.
+
+| Policy | Behavior |
+|--------|----------|
+| `skip` | Skip the new run |
+| `allow` | Run in parallel (default) |
+| `queue` | Buffer one pending run (queue size 1) |
+
+## Failure Policies
+
+Controls what happens when a job exits with a non-zero status.
+
+| Policy | Behavior |
+|--------|----------|
+| `retry` | Retry up to `retry_count` times with optional backoff |
+| `skip` | Ignore the failure, continue scheduling |
+| `pause` | Disable the job until manually re-enabled |
+
+When using `retry`, configure the backoff strategy:
+
+| Field | Values | Description |
+|-------|--------|-------------|
+| `backoff` | `exponential`, `fixed` | How the delay grows between retries |
+| `backoff_interval` | Go duration (e.g. `5s`) | Base interval; exponential doubles each retry |
+
+## Settings Fields
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `history_limit` | int | `100` | Maximum run records kept per job in the database |
+| `log_dir` | string | `""` (OS default) | Custom directory for job log files |
+| `log_max_size` | int | `10` | Maximum size in MB per log file before rotation |
+| `log_max_files` | int | `5` | Number of rotated log files to retain |
+| `shutdown_timeout` | duration | `"30s"` | Time to wait for running jobs during graceful shutdown |
+
+## Data Paths
+
+Kronos stores its runtime data in the OS-native cache directory:
+
+| File | macOS / Linux | Windows |
+|------|--------------|---------|
+| Config | `~/.config/kronos/kronos.yaml` | `%APPDATA%/kronos/kronos.yaml` |
+| Database | `~/.cache/kronos/kronos.db` | `%LOCALAPPDATA%/kronos/kronos.db` |
+| Logs | `~/.cache/kronos/logs/` | `%LOCALAPPDATA%/kronos/logs/` |
+| PID lock | `~/.cache/kronos/kronos.pid` | `%LOCALAPPDATA%/kronos/kronos.pid` |
+
+The log directory can be overridden with the `settings.log_dir` field. All
+other paths follow the OS conventions provided by Go's `os.UserConfigDir()`
+and `os.UserCacheDir()`.
+---
+<!-- Section: Command Reference -->
+# Command Reference
+
+Complete reference for every Kronos command. Commands are grouped by
+function: setup, job management, execution, monitoring, data, and
+maintenance.
+
+## Global Flags
+
+These flags are available on every command.
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--config` / `-f` | string | `~/.config/kronos/kronos.yaml` | Config file path |
+| `--no-color` | bool | `false` | Disable color output |
+| `--json` | bool | `false` | Machine-readable JSON output |
+
+## Setup
+
+### kronos init
+
+Create a starter `kronos.yaml` config file.
+
+Usage: `kronos init [flags]`
+
+No command-specific flags.
+
+Examples:
+```bash
+# Create config at the default location
+kronos init
+
+# Create config at a custom path
+kronos init -f /path/to/kronos.yaml
+```
+
+Notes:
+- If a config file already exists at the target path, you are prompted to
+  confirm before overwriting.
+- The starter config contains a sample "hello" job that runs every minute.
+
+### kronos doctor
+
+Validate your Kronos setup.
+
+Usage: `kronos doctor [flags]`
+
+No command-specific flags.
+
+Examples:
+```bash
+kronos doctor
+
+# Check a specific config file
+kronos doctor -f /path/to/kronos.yaml
+```
+
+Checks performed:
+1. Config file exists
+2. Config parses without errors
+3. All jobs pass validation
+4. Each job's command is found in `PATH`
+5. Log directory is writable
+6. Cache directory is writable
+7. No other Kronos instance is running (PID lock)
+
+Each check reports `[OK]`, `[WARN]`, or `[FAIL]`.
+
+### kronos edit
+
+Open the config file in your editor for manual editing.
+
+Usage: `kronos edit [flags]`
+
+No command-specific flags.
+
+Examples:
+```bash
+# Open in $EDITOR (falls back to vi on Unix, notepad on Windows)
+kronos edit
+
+# Edit a specific config file
+kronos edit -f /path/to/kronos.yaml
+```
+
+Notes:
+- Uses `$EDITOR` environment variable. Falls back to `vi` on Unix and
+  `notepad` on Windows.
+- After saving, the config is validated. If errors are found you are prompted
+  to re-edit.
+- On successful save, prints the file path and job count.
+
+## Job Management
+
+### kronos add
+
+Add a new job to the config.
+
+Usage: `kronos add [flags]`
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--name` | string | — | Job name (required) |
+| `--cmd` | string | — | Command to run (required) |
+| `--schedule` | string | — | Cron schedule expression (required) |
+| `--description` | string | `""` | Job description |
+| `--dir` | string | `""` | Working directory |
+| `--shell` | string | `""` | Shell to use |
+| `--once` | bool | `false` | Run only once then disable |
+| `--timeout` | string | `""` | Execution timeout (e.g. `30m`) |
+| `--overlap` | string | `""` | Overlap policy: `skip` \| `allow` \| `queue` |
+| `--on-failure` | string | `""` | Failure policy: `retry` \| `skip` \| `pause` |
+| `--retry-count` | int | `0` | Number of retries on failure |
+| `--tag` | string slice | `[]` | Tags (repeatable) |
+
+Examples:
+```bash
+# Add a simple job
+kronos add --name backup --cmd "pg_dump mydb > /tmp/db.sql" --schedule "@daily"
+
+# Add a job with all options
+kronos add \
+  --name deploy \
+  --cmd "rsync -avz /src/ /dst/" \
+  --schedule "0 2 * * *" \
+  --description "Nightly deploy" \
+  --dir /opt/myapp \
+  --shell bash \
+  --timeout 30m \
+  --overlap skip \
+  --on-failure retry \
+  --retry-count 3 \
+  --tag prod --tag deploy
+```
+
+Notes:
+- The job name must be unique within the config.
+- The config is validated after adding the job. If validation fails the job is
+  not saved.
+
+### kronos remove
+
+Remove a job from the config.
+
+Usage: `kronos remove <name> [flags]`
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--yes` / `-y` | bool | `false` | Skip confirmation prompt |
+
+Examples:
+```bash
+# Remove with confirmation prompt
+kronos remove backup
+
+# Remove without confirmation
+kronos remove backup --yes
+```
+
+Notes:
+- Requires exactly one positional argument: the job name.
+- Unless `--yes` is passed, you are prompted to confirm the deletion.
+
+### kronos enable
+
+Enable a previously disabled job.
+
+Usage: `kronos enable <name>`
+
+No command-specific flags.
+
+Examples:
+```bash
+kronos enable backup
+```
+
+Notes:
+- Requires exactly one positional argument: the job name.
+- Sets the job's `enabled` field to `true` and saves the config.
+
+### kronos disable
+
+Disable a job so it no longer runs on schedule.
+
+Usage: `kronos disable <name>`
+
+No command-specific flags.
+
+Examples:
+```bash
+kronos disable backup
+```
+
+Notes:
+- Requires exactly one positional argument: the job name.
+- Sets the job's `enabled` field to `false` and saves the config.
+- A disabled job can still be triggered manually with `kronos run`.
+
+### kronos pause-all
+
+Disable all jobs at once.
+
+Usage: `kronos pause-all`
+
+No command-specific flags.
+
+Examples:
+```bash
+kronos pause-all
+```
+
+Notes:
+- Sets `enabled: false` on every job that is currently enabled.
+- Prints the number of jobs that were paused.
+
+### kronos resume-all
+
+Enable all jobs at once.
+
+Usage: `kronos resume-all`
+
+No command-specific flags.
+
+Examples:
+```bash
+kronos resume-all
+```
+
+Notes:
+- Sets `enabled: true` on every job that is currently disabled.
+- Prints the number of jobs that were resumed.
+
+## Execution
+
+### kronos start
+
+Start the scheduler in the foreground.
+
+Usage: `kronos start [flags]`
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--tui` | bool | `false` | Launch interactive terminal UI |
+
+Examples:
+```bash
+# Run in headless mode
+kronos start
+
+# Run with the interactive TUI
+kronos start --tui
+
+# Use a custom config
+kronos start -f /path/to/kronos.yaml
+```
+
+Notes:
+- Acquires a PID lock to prevent multiple instances from running
+  simultaneously.
+- In headless mode, press `Ctrl+C` to stop gracefully.
+- In TUI mode, press `q` or `Ctrl+C` to quit. The TUI provides live job
+  status, log streaming, and run history across three tabs.
+- Watches the config file for changes and hot-reloads jobs automatically.
+- Respects the `settings.shutdown_timeout` value for graceful shutdown.
+
+### kronos run
+
+Manually trigger a single job outside its schedule.
+
+Usage: `kronos run <name> [flags]`
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--dry-run` | bool | `false` | Print what would run without executing |
+
+Examples:
+```bash
+# Run a job immediately
+kronos run backup
+
+# Preview what would run
+kronos run backup --dry-run
+```
+
+Notes:
+- Requires exactly one positional argument: the job name.
+- The run result is saved to the history database with trigger type "manual".
+- `--dry-run` prints the command, working directory, shell, and timeout
+  without actually executing anything.
+
+### kronos daemon
+
+Run Kronos as a background daemon.
+
+Usage: `kronos daemon`
+
+No command-specific flags.
+
+Examples:
+```bash
+kronos daemon
+```
+
+Notes:
+- Self-daemonizes by spawning `kronos start` as a detached background process.
+- Prints the PID of the daemon process.
+- The daemon inherits the current config path (via `-f` flag).
+- Use `kronos daemon install` for OS-native service integration that persists
+  across reboots.
+
+### kronos daemon install
+
+Install Kronos as an OS-native service.
+
+Usage: `kronos daemon install`
+
+No command-specific flags.
+
+Examples:
+```bash
+kronos daemon install
+```
+
+Platform behavior:
+
+| Platform | Service Type | Location |
+|----------|-------------|----------|
+| macOS | launchd | `~/Library/LaunchAgents/com.kronos.agent.plist` |
+| Linux | systemd user service | `~/.config/systemd/user/kronos.service` |
+| Windows | Task Scheduler | `KronosScheduler` task |
+
+Notes:
+- The service starts automatically at login.
+- On macOS, the service restarts automatically via `KeepAlive`.
+- On Linux, the service restarts on failure with a delay.
+- On Windows, the task is triggered at user logon.
+
+### kronos daemon uninstall
+
+Remove the Kronos OS-native service.
+
+Usage: `kronos daemon uninstall`
+
+No command-specific flags.
+
+Examples:
+```bash
+kronos daemon uninstall
+```
+
+Notes:
+- Removes the service entry created by `kronos daemon install`.
+- On macOS, unloads the launchd plist and deletes the file.
+- On Linux, stops, disables, and removes the systemd unit file.
+- On Windows, deletes the scheduled task.
+
+## Monitoring
+
+### kronos status
+
+Show a status overview of all jobs.
+
+Usage: `kronos status [flags]`
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--stats` | bool | `false` | Show per-job metrics (runs, success rate, durations) |
+
+Examples:
+```bash
+# Default status table
+kronos status
+
+# Status as JSON
+kronos status --json
+
+# Per-job metrics
+kronos status --stats
+
+# Metrics as JSON
+kronos status --stats --json
+```
+
+Default output columns:
+
+| Column | Description |
+|--------|-------------|
+| NAME | Job name |
+| SCHEDULE | Cron expression |
+| STATUS | `active` or `disabled` |
+| LAST RUN | Timestamp of the most recent run |
+| NEXT RUN | Computed next scheduled run time |
+| LAST RESULT | `OK` with duration or `FAIL` with exit code |
+
+With `--stats`, output columns:
+
+| Column | Description |
+|--------|-------------|
+| NAME | Job name |
+| RUNS | Total number of recorded runs |
+| SUCCESS RATE | Percentage of successful runs |
+| AVG DURATION | Average execution time |
+| P95 DURATION | 95th percentile execution time |
+| LAST FAILURE | Timestamp of the most recent failure |
+
+Notes:
+- Reads run history from the local database (`kronos.db`).
+- With `--stats`, an aggregate summary line is printed after the table.
+
+### kronos logs
+
+View log output for a specific job.
+
+Usage: `kronos logs <job> [flags]`
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--follow` / `-f` | bool | `false` | Follow log output (like `tail -f`) |
+| `--lines` / `-n` | int | `50` | Number of lines to show |
+
+Examples:
+```bash
+# Show the last 50 lines
+kronos logs backup
+
+# Show the last 100 lines
+kronos logs backup -n 100
+
+# Stream new log output in real time
+kronos logs backup --follow
+```
+
+Notes:
+- Requires exactly one positional argument: the job name.
+- Log files are stored in the configured log directory (default:
+  `~/.cache/kronos/logs/<name>.log`).
+- `--follow` uses filesystem notifications to stream new lines as they are
+  written. Press `Ctrl+C` to stop.
+- Note: the `-f` shorthand for `--follow` is a local flag and does not
+  conflict with the global `-f` shorthand for `--config`.
+
+## Data
+
+### kronos list
+
+List all configured jobs.
+
+Usage: `kronos list [flags]`
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--tag` | string | `""` | Filter jobs by tag |
+
+Examples:
+```bash
+# List all jobs
+kronos list
+
+# Filter by tag
+kronos list --tag prod
+
+# Output as JSON
+kronos list --json
+```
+
+Output columns:
+
+| Column | Description |
+|--------|-------------|
+| NAME | Job name |
+| SCHEDULE | Cron expression |
+| ENABLED | `yes` or `no` |
+| TAGS | Comma-separated tags |
+| DESCRIPTION | Job description |
+
+### kronos export
+
+Export jobs to native scheduler formats.
+
+Usage: `kronos export [flags]`
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--format` | string | `crontab` | Export format: `crontab` \| `launchd` \| `systemd` |
+| `--output` / `-o` | string | `""` (stdout) | Output file path |
+
+Examples:
+```bash
+# Export to crontab format (stdout)
+kronos export
+
+# Export to a file
+kronos export -o backup.cron
+
+# Export as launchd plists
+kronos export --format launchd -o jobs.plist
+
+# Export as systemd units
+kronos export --format systemd -o jobs.service
+```
+
+Notes:
+- By default, exports to stdout. Use `-o` to write to a file.
+- The `crontab` format produces standard 5-field cron lines.
+- The `launchd` format produces macOS plist XML.
+- The `systemd` format produces systemd timer and service units.
+
+### kronos import
+
+Import jobs from crontab or other formats.
+
+Usage: `kronos import [flags]`
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--from` | string | `crontab` | Import format (currently only `crontab`) |
+| `--file` | string | `""` (stdin) | Input file path |
+
+Examples:
+```bash
+# Import from a file
+kronos import --file my-crontab.txt
+
+# Import from current crontab via stdin
+crontab -l | kronos import
+
+# Import from a specific file with explicit format
+kronos import --from crontab --file /etc/crontab
+```
+
+Notes:
+- When `--file` is omitted, reads from stdin.
+- Auto-generates job names from the command basename.
+- Picks up `KEY=VALUE` environment variable lines.
+- Skips `@reboot` entries with a warning.
+- Handles system crontab format (6-field with username).
+- Duplicate job names are skipped. Prints the count of added and skipped jobs.
+- The merged config is validated before saving.
+
+### kronos prune
+
+Delete old history records from the database.
+
+Usage: `kronos prune [flags]`
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--older-than` | string | `""` | Delete records older than duration (e.g. `30d`, `2w`, `24h`) |
+| `--keep` | int | `0` | Keep only the last N records per job |
+| `--job` | string | `""` | Filter by job name |
+| `--dry-run` | bool | `false` | Show what would be deleted without deleting |
+
+Examples:
+```bash
+# Delete records older than 30 days
+kronos prune --older-than 30d
+
+# Keep only the last 50 records per job
+kronos prune --keep 50
+
+# Preview what would be deleted
+kronos prune --older-than 2w --dry-run
+
+# Prune a specific job
+kronos prune --older-than 7d --job backup
+
+# Combine both criteria
+kronos prune --older-than 30d --keep 100
+
+# JSON output
+kronos prune --older-than 30d --json
+```
+
+Notes:
+- At least one of `--older-than` or `--keep` is required.
+- The `--older-than` flag supports day (`d`), week (`w`), and standard Go
+  durations (`h`, `m`, `s`). The value must be positive.
+- When both `--older-than` and `--keep` are used together with `--dry-run`,
+  the reported count is an upper bound since the criteria may overlap.
+- Supports `--json` output for scripting.
+
+## Maintenance
+
+### kronos update
+
+Self-update Kronos to the latest release.
+
+Usage: `kronos update`
+
+No command-specific flags.
+
+Examples:
+```bash
+kronos update
+```
+
+Notes:
+- Downloads the latest release from GitHub.
+- Compares the current version against the latest available version.
+- Replaces the current binary in place.
+
+### kronos version
+
+Print version information.
+
+Usage: `kronos version`
+
+No command-specific flags.
+
+Examples:
+```bash
+kronos version
+```
+
+Output format:
+
+```
+kronos version <version> (commit <sha>, built <date>)
+```
+
+Notes:
+- Version, commit, and build date are set at compile time via `-ldflags`.
+- During development, defaults to `version dev (commit none, built unknown)`.
+---
+<!-- Section: Daemon & Platforms -->
+# Daemon & Platforms
+
+Kronos supports three execution modes: foreground, background daemon, and
+OS-native service. This guide covers each mode and the platform-specific
+integration details.
+
+## Running Kronos
+
+### Foreground (`kronos start`)
+
+Runs the scheduler in the current terminal session. Press `Ctrl+C` to stop
+gracefully. Add `--tui` for an interactive terminal UI.
+
+```bash
+kronos start          # headless mode
+kronos start --tui    # interactive terminal UI
+```
+
+### Background daemon (`kronos daemon`)
+
+Self-daemonizes by spawning `kronos start` as a detached background process.
+The parent exits immediately after printing the child PID.
+
+```bash
+kronos daemon
+# Kronos daemon started (PID 12345)
+```
+
+On Unix, the child process runs in a new session (`setsid`). On Windows, it
+uses `CREATE_NEW_PROCESS_GROUP` to detach from the console.
+
+The daemon inherits the current config path. To use a custom config:
+
+```bash
+kronos daemon -f /path/to/kronos.yaml
+```
+
+### OS-native service (`kronos daemon install`)
+
+Registers Kronos with the platform's service manager so it starts
+automatically at login and restarts on failure. Kronos auto-detects the
+platform and uses the appropriate integration:
+
+| Platform | Service Manager | Detection |
+|----------|----------------|-----------|
+| macOS | launchd | `runtime.GOOS == "darwin"` |
+| Linux | systemd (user) | `runtime.GOOS == "linux"` |
+| Windows | Task Scheduler | `runtime.GOOS == "windows"` |
+
+```bash
+kronos daemon install      # install the service
+kronos daemon uninstall    # remove the service
+```
+
+## macOS (launchd)
+
+### Install
+
+`kronos daemon install` creates a launchd property list at:
+
+```
+~/Library/LaunchAgents/com.kronos.agent.plist
+```
+
+The generated plist contains:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.kronos.agent</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/path/to/kronos</string>
+        <string>start</string>
+        <string>-f</string>
+        <string>/path/to/kronos.yaml</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>~/.cache/kronos/daemon.log</string>
+    <key>StandardErrorPath</key>
+    <string>~/.cache/kronos/daemon.log</string>
+</dict>
+</plist>
+```
+
+Key behaviors:
+
+- **RunAtLoad**: starts automatically when the user logs in.
+- **KeepAlive**: launchd restarts Kronos if it exits for any reason.
+- **StandardOutPath / StandardErrorPath**: daemon stdout and stderr are
+  written to `~/.cache/kronos/daemon.log`.
+
+After writing the plist, Kronos runs `launchctl load <plist-path>` to
+activate the service immediately.
+
+### Uninstall
+
+`kronos daemon uninstall` runs `launchctl unload <plist-path>` to stop the
+service, then deletes the plist file.
+
+## Linux (systemd)
+
+### Install
+
+`kronos daemon install` creates a systemd user service at:
+
+```
+~/.config/systemd/user/kronos.service
+```
+
+The generated unit file contains:
+
+```ini
+[Unit]
+Description=Kronos Scheduler
+After=default.target
+
+[Service]
+ExecStart=/path/to/kronos start -f /path/to/kronos.yaml
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+```
+
+Key behaviors:
+
+- **Restart=on-failure**: systemd restarts Kronos if it exits with a
+  non-zero status.
+- **RestartSec=5**: waits 5 seconds between restart attempts.
+- **WantedBy=default.target**: the service starts when the user session
+  is ready.
+
+After writing the unit file, Kronos runs the following commands:
+
+```bash
+systemctl --user daemon-reload
+systemctl --user enable kronos
+systemctl --user start kronos
+```
+
+### Uninstall
+
+`kronos daemon uninstall` runs:
+
+```bash
+systemctl --user stop kronos
+systemctl --user disable kronos
+```
+
+Then deletes the service file and runs `systemctl --user daemon-reload` to
+clean up. Errors from stop/disable are ignored (the service may not be
+running or enabled).
+
+### Useful commands
+
+```bash
+# Check service status
+systemctl --user status kronos
+
+# View service logs
+journalctl --user -u kronos -f
+
+# Restart the service
+systemctl --user restart kronos
+```
+
+## Windows (Task Scheduler)
+
+### Install
+
+`kronos daemon install` creates a scheduled task named `KronosScheduler`
+using the `schtasks` command:
+
+```
+schtasks /create /tn KronosScheduler /tr "\"kronos\" start -f \"kronos.yaml\"" /sc onlogon /rl limited /f
+```
+
+Key behaviors:
+
+- **/sc onlogon**: triggers at user logon.
+- **/rl limited**: runs at standard (non-elevated) privilege.
+- **/f**: overwrites any existing task with the same name.
+
+### Uninstall
+
+`kronos daemon uninstall` deletes the task:
+
+```
+schtasks /delete /tn KronosScheduler /f
+```
+
+### Useful commands
+
+```powershell
+# List the Kronos task
+schtasks /query /tn KronosScheduler /v
+
+# Run the task manually
+schtasks /run /tn KronosScheduler
+
+# Open Task Scheduler GUI
+taskschd.msc
+```
+
+## Single Instance (PID Lock)
+
+Kronos uses a PID lock file to ensure only one instance runs at a time.
+The lock file is located at:
+
+| OS | Path |
+|----|------|
+| macOS / Linux | `~/.cache/kronos/kronos.pid` |
+| Windows | `%LOCALAPPDATA%/kronos/kronos.pid` |
+
+### How it works
+
+1. On startup (`kronos start`), Kronos writes its PID to the lock file.
+2. If a lock file already exists, Kronos reads the stored PID and checks
+   whether the process is still alive (using signal 0 on Unix).
+3. If the process is alive, Kronos exits with an error:
+   `another kronos instance is running (PID <n>)`.
+4. If the process is not alive (stale PID), Kronos removes the stale lock
+   file and acquires a new lock.
+5. On shutdown, Kronos deletes the lock file.
+
+### Stale PID detection
+
+A PID file is considered stale when:
+
+- The stored PID does not correspond to a running process.
+- The file contents cannot be parsed as an integer (corrupt file).
+
+In both cases, the stale file is automatically cleaned up.
+
+### Troubleshooting
+
+If Kronos refuses to start due to a PID lock but no other instance is
+running, the PID file may be left over from a crash. You can safely remove
+it:
+
+```bash
+rm ~/.cache/kronos/kronos.pid
+```
+
+Or use `kronos doctor` to detect and report the situation.
+---
+<!-- Section: Import & Export -->
+# Import & Export
+
+Kronos can export your jobs to native scheduler formats and import jobs
+from existing crontab files.
+
+## Export
+
+Usage: `kronos export [--format <fmt>] [--output <file>]`
+
+Supported formats: `crontab` (default), `launchd`, `systemd`.
+
+Disabled jobs are skipped in all export formats. When `-o` is omitted,
+output is written to stdout.
+
+### Crontab format
+
+Produces standard 5-field cron lines. Each job is preceded by a
+`# kronos: <name>` comment. Descriptor schedules are mapped to their
+5-field equivalents:
+
+| Descriptor | Cron Equivalent |
+|-----------|----------------|
+| `@daily` / `@midnight` | `0 0 * * *` |
+| `@hourly` | `0 * * * *` |
+| `@weekly` | `0 0 * * 0` |
+| `@monthly` | `0 0 1 * *` |
+| `@yearly` / `@annually` | `0 0 1 1 *` |
+
+Jobs with `@every` schedules cannot be represented in crontab format.
+They are emitted as commented-out lines with a `WARNING` note:
+
+```
+# kronos: poller
+# WARNING: @every not supported in cron
+# @every 30s curl http://localhost/health
+```
+
+Environment variables and working directories are inlined into the
+command string (e.g. `KEY=VAL cd /dir && cmd`).
+
+Example output:
+
+```cron
+# kronos: backup
+0 0 * * * pg_dump mydb > /backups/db.sql
+
+# kronos: cleanup
+0 * * * * find /tmp -mtime +7 -delete
+```
+
+### Launchd format
+
+Produces one macOS plist XML block per job. Each block is preceded by a
+`<!-- save as com.kronos.<name>.plist -->` comment.
+
+- Cron schedules and descriptors use `StartCalendarInterval`.
+- `@every` schedules use `StartInterval` (seconds).
+- Commands are wrapped with `/bin/sh -c` in `ProgramArguments`.
+- Working directories use the `WorkingDirectory` key.
+- Environment variables use the `EnvironmentVariables` dict.
+
+Example output:
+
+```xml
+<!-- save as com.kronos.backup.plist -->
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.kronos.backup</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/sh</string>
+        <string>-c</string>
+        <string>pg_dump mydb > /backups/db.sql</string>
+    </array>
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>0</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+</dict>
+</plist>
+```
+
+### Systemd format
+
+Produces a `.timer` and `.service` unit pair per job. Each unit is
+preceded by a `# --- save as kronos-<name>.timer ---` or
+`# --- save as kronos-<name>.service ---` comment.
+
+- Cron schedules and descriptors use `OnCalendar`.
+- `@every` schedules use `OnUnitActiveSec`.
+- Services use `Type=oneshot` with `ExecStart=/bin/sh -c '<cmd>'`.
+- Timers include `Persistent=true` so missed runs are caught up.
+- Working directories use `WorkingDirectory`.
+- Environment variables use `Environment=KEY=VAL` directives.
+
+Example output:
+
+```ini
+# --- save as kronos-backup.timer ---
+[Unit]
+Description=Kronos timer for backup
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+
+# --- save as kronos-backup.service ---
+[Unit]
+Description=Kronos service for backup
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'pg_dump mydb > /backups/db.sql'
+```
+
+## Import
+
+Usage: `kronos import [--from crontab] [--file <path>]`
+
+Currently only crontab import is supported. When `--file` is omitted,
+reads from stdin.
+
+```bash
+# Import from a file
+kronos import --file my-crontab.txt
+
+# Import from current crontab via stdin
+crontab -l | kronos import
+
+# Import a system crontab (6-field format with username column)
+kronos import --file /etc/crontab
+```
+
+### How it works
+
+1. Blank lines and comments (`#`) are skipped.
+2. `KEY=VALUE` lines are captured as environment variables and attached
+   to all subsequent jobs.
+3. Standard 5-field cron lines are parsed into schedule + command.
+4. System crontab lines (6-field with username column) are detected
+   automatically — the username field is stripped.
+5. Descriptor schedules (`@daily`, `@hourly`, etc.) are preserved as-is.
+6. Job names are auto-generated from the command basename, sanitized to
+   lowercase alphanumeric characters and hyphens, and truncated to 30
+   characters. Duplicates get a numeric suffix (e.g. `curl`, `curl-2`).
+
+### Merge behavior
+
+Imported jobs are merged into the existing config:
+
+- If a job with the same name already exists, the import is **skipped**
+  for that job.
+- New jobs are appended to the config.
+- The merged config is validated before saving.
+- A summary is printed showing how many jobs were added and skipped.
+
+### Skipped entries
+
+- `@reboot` lines are skipped with a warning (Kronos does not support
+  reboot triggers).
+- Lines that cannot be parsed are skipped with a warning.
+
+## Limitations
+
+| Limitation | Details |
+|-----------|---------|
+| `@every` not exportable to crontab | Crontab has no interval syntax; these jobs are commented out with a warning |
+| `@reboot` not importable | Kronos does not support run-at-boot triggers |
+| Import format | Only `crontab` is currently supported as an import source |
+| Cron field restrictions | Launchd export only handles simple integer cron fields (no ranges or step values) |
+---
+<!-- Section: Troubleshooting -->
+# Troubleshooting
+
+## Doctor Checks
+
+Run `kronos doctor` to validate your setup. Each check reports `[OK]`,
+`[WARN]`, or `[FAIL]`. Below is what each check means and how to fix
+failures.
+
+| Check | Level | Failure Meaning | Fix |
+|-------|-------|----------------|-----|
+| Config file found | FAIL | No config file at the expected path | Run `kronos init` to create one, or pass `-f` to point to an existing file |
+| Config is valid | FAIL | YAML syntax error or invalid structure | Fix the YAML syntax; run `kronos edit` which validates on save |
+| All jobs pass validation | FAIL | A job has invalid or missing fields (e.g. empty `name`, `cmd`, or `schedule`) | Check the specific field error in the output and correct it in the config |
+| Job command found in PATH | WARN | The first word of a job's `cmd` is not in your `PATH` | Install the missing tool, or use an absolute path in `cmd` |
+| Log directory writable | FAIL | Cannot create or write files in the log directory | Check permissions on `~/.cache/kronos/logs/` (or your custom `settings.log_dir`) |
+| Cache directory writable | FAIL | Cannot create or write files in the cache directory | Check permissions on `~/.cache/kronos/` |
+| No other instance running | WARN | A PID lock file exists with a live process | Stop the other instance, or remove a stale PID file (see below) |
+
+## Common Issues
+
+### "another kronos instance is running"
+
+Kronos uses a PID lock file to prevent multiple instances. If the
+previous process crashed without cleaning up, the lock file may be
+stale.
+
+```bash
+# Check if the PID is actually running
+cat ~/.cache/kronos/kronos.pid
+ps -p <pid>
+
+# If the process is not running, remove the stale lock
+rm ~/.cache/kronos/kronos.pid
+```
+
+On Windows, the PID file is at `%LOCALAPPDATA%/kronos/kronos.pid`.
+
+### "Permission denied" on daemon install
+
+- **macOS**: Ensure `~/Library/LaunchAgents/` exists and is writable by
+  your user. Kronos creates the directory automatically, but parent
+  directory permissions may block it.
+- **Linux**: Ensure `~/.config/systemd/user/` is writable. If systemd
+  user services are not available, check that `systemctl --user` works.
+- **Windows**: Task Scheduler requires standard user privileges. If
+  running in a restricted environment, consult your system administrator.
+
+### Jobs not running
+
+1. Verify the job is enabled: `kronos list` shows `yes` in the ENABLED
+   column.
+2. Check the schedule syntax: run `kronos doctor` to validate.
+3. Confirm the scheduler is running: `kronos status` shows job status
+   and next run times.
+4. Check job logs for errors: `kronos logs <name>`.
+
+### Logs missing
+
+Job logs are stored in the configured log directory:
+
+- Default: `~/.cache/kronos/logs/<name>.log`
+- Custom: set `settings.log_dir` in `kronos.yaml`
+
+If the directory does not exist, Kronos creates it on first run. If
+logs are still missing, run `kronos doctor` to check directory write
+permissions.
+
+### High disk usage from history
+
+Kronos stores run history in a local database. To clean up old records:
+
+```bash
+# Delete records older than 30 days
+kronos prune --older-than 30d
+
+# Preview before deleting
+kronos prune --older-than 30d --dry-run
+
+# Keep only the last 50 records per job
+kronos prune --keep 50
+```
+
+You can also set `settings.history_limit` in the config to cap the
+number of records kept per job automatically.
+
+## FAQ
+
+### How do I run Kronos at login?
+
+Install it as an OS-native service:
+
+```bash
+kronos daemon install
+```
+
+This creates the appropriate service entry for your platform (launchd on
+macOS, systemd on Linux, Task Scheduler on Windows). See
+[Daemon & Platforms](./daemon-and-platforms.md) for details.
+
+### Where are my logs?
+
+Job logs: `~/.cache/kronos/logs/` (or the path set in
+`settings.log_dir`).
+
+Daemon logs (when running as a service): `~/.cache/kronos/daemon.log`
+on macOS. On Linux, use `journalctl --user -u kronos`.
+
+### How do I migrate from crontab?
+
+Pipe your existing crontab directly into Kronos:
+
+```bash
+crontab -l | kronos import
+```
+
+Or import from a file:
+
+```bash
+kronos import --file /path/to/crontab-backup.txt
+```
+
+See [Import & Export](./import-export.md) for details on how jobs are
+named and merged.
+
+### How do I back up my jobs?
+
+Export to a crontab file:
+
+```bash
+kronos export -o backup.cron
+```
+
+Or export to other formats:
+
+```bash
+kronos export --format launchd -o backup.plist
+kronos export --format systemd -o backup.service
+```
+
+### Can I run multiple Kronos instances?
+
+No. Kronos uses a PID lock file (`~/.cache/kronos/kronos.pid`) to
+enforce single-instance operation. If you need to manage separate sets
+of jobs, use different config files and separate cache directories.
