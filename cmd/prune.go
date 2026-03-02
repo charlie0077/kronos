@@ -89,7 +89,8 @@ var pruneCmd = &cobra.Command{
 			totalDeleted += count
 		}
 
-		return outputPruneResult(totalDeleted, jobName, dryRun)
+		bothFlags := olderThan != "" && keep > 0
+		return outputPruneResult(totalDeleted, jobName, dryRun, bothFlags)
 	},
 }
 
@@ -132,10 +133,15 @@ func pruneKeepNForJob(db *store.Store, jobName string, keepN int, dryRun bool) (
 	return count, nil
 }
 
-// outputPruneResult formats and prints the prune result.
-func outputPruneResult(deleted int, jobName string, dryRun bool) error {
+// outputPruneResult formats and prints the prune result. When bothFlags is true
+// and dryRun is active, a note is appended explaining the count is an upper bound.
+func outputPruneResult(deleted int, jobName string, dryRun bool, bothFlags bool) error {
+	msg := formatPruneMessage(deleted, dryRun)
+	if dryRun && bothFlags {
+		msg += " (upper bound — combining --older-than and --keep may delete fewer)"
+	}
+
 	if jsonOut {
-		msg := formatPruneMessage(deleted, dryRun)
 		result := pruneResult{
 			DryRun:  dryRun,
 			Job:     jobName,
@@ -145,7 +151,7 @@ func outputPruneResult(deleted int, jobName string, dryRun bool) error {
 		return json.NewEncoder(os.Stdout).Encode(result)
 	}
 
-	fmt.Println(formatPruneMessage(deleted, dryRun))
+	fmt.Println(msg)
 	return nil
 }
 
@@ -158,13 +164,17 @@ func formatPruneMessage(count int, dryRun bool) string {
 }
 
 // parseDuration extends time.ParseDuration with support for day ("d") and
-// week ("w") suffixes.
+// week ("w") suffixes. It rejects zero and negative values to prevent
+// accidental deletion of all records.
 func parseDuration(s string) (time.Duration, error) {
 	if strings.HasSuffix(s, daysUnit) && !strings.HasSuffix(s, "ms") {
 		numStr := strings.TrimSuffix(s, daysUnit)
 		days, err := strconv.Atoi(numStr)
 		if err != nil {
 			return 0, fmt.Errorf("parsing days: %w", err)
+		}
+		if days <= 0 {
+			return 0, fmt.Errorf("duration must be positive, got %dd", days)
 		}
 		return time.Duration(days) * hoursPerDay * time.Hour, nil
 	}
@@ -174,7 +184,17 @@ func parseDuration(s string) (time.Duration, error) {
 		if err != nil {
 			return 0, fmt.Errorf("parsing weeks: %w", err)
 		}
+		if weeks <= 0 {
+			return 0, fmt.Errorf("duration must be positive, got %dw", weeks)
+		}
 		return time.Duration(weeks) * daysPerWeek * hoursPerDay * time.Hour, nil
 	}
-	return time.ParseDuration(s)
+	d, err := time.ParseDuration(s)
+	if err != nil {
+		return 0, err
+	}
+	if d <= 0 {
+		return 0, fmt.Errorf("duration must be positive, got %s", s)
+	}
+	return d, nil
 }
